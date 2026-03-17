@@ -38,6 +38,7 @@ theme:
 nav:
   - Home: index.md
   - Getting Started: getting-started.md
+  - Debate Templates: templates.md
   - How It Works: how-it-works.md
   - Architecture: architecture.md
   - Session Orchestration: session-orchestration.md

@@ -14,12 +14,16 @@ Tables:
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 import aiosqlite
 
-_DEFAULT_DB_DIR = Path.home() / ".ploidy"
-_DEFAULT_DB_PATH = _DEFAULT_DB_DIR / "ploidy.db"
+from ploidy.exceptions import PloidyError
+
+_DEFAULT_DB_PATH = Path(
+    os.environ.get("PLOIDY_DB_PATH", str(Path.home() / ".ploidy" / "ploidy.db"))
+)
 
 _CREATE_TABLES = """
 CREATE TABLE IF NOT EXISTS debates (
@@ -59,6 +63,13 @@ CREATE TABLE IF NOT EXISTS convergence (
 """
 
 
+def _require_db(db: aiosqlite.Connection | None) -> aiosqlite.Connection:
+    """Validate that the database connection is initialized."""
+    if db is None:
+        raise PloidyError("Store not initialized — call initialize() first")
+    return db
+
+
 class DebateStore:
     """Async SQLite store for debate data.
 
@@ -81,7 +92,7 @@ class DebateStore:
         self.db_path = db_path
         self._db: aiosqlite.Connection | None = None
 
-    async def __aenter__(self) -> "DebateStore":
+    async def __aenter__(self) -> DebateStore:
         """Enter the async context manager -- open DB and create tables."""
         await self.initialize()
         return self
@@ -98,14 +109,19 @@ class DebateStore:
     async def initialize(self) -> None:
         """Create database tables if they don't exist.
 
-        Sets up the schema for debates, sessions, messages,
-        and convergence results.
+        Enables WAL mode for concurrent read/write access and sets up
+        the schema for debates, sessions, messages, and convergence results.
         """
-        self.db_path.parent.mkdir(parents=True, exist_ok=True)
+        self.db_path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
         self._db = await aiosqlite.connect(self.db_path)
         self._db.row_factory = aiosqlite.Row
+        await self._db.execute("PRAGMA journal_mode=WAL")
         await self._db.executescript(_CREATE_TABLES)
         await self._db.commit()
+
+    # ------------------------------------------------------------------
+    # Debates
+    # ------------------------------------------------------------------
 
     async def save_debate(self, debate_id: str, prompt: str) -> None:
         """Persist a new debate record.
@@ -114,12 +130,12 @@ class DebateStore:
             debate_id: Unique identifier for the debate.
             prompt: The decision prompt for the debate.
         """
-        assert self._db is not None, "Store not initialized"
-        await self._db.execute(
+        db = _require_db(self._db)
+        await db.execute(
             "INSERT INTO debates (id, prompt) VALUES (?, ?)",
             (debate_id, prompt),
         )
-        await self._db.commit()
+        await db.commit()
 
     async def get_debate(self, debate_id: str) -> dict | None:
         """Retrieve a debate by its ID.
@@ -130,8 +146,8 @@ class DebateStore:
         Returns:
             Debate record as a dict, or None if not found.
         """
-        assert self._db is not None, "Store not initialized"
-        cursor = await self._db.execute(
+        db = _require_db(self._db)
+        cursor = await db.execute(
             "SELECT id, prompt, status, created_at, updated_at "
             "FROM debates WHERE id = ?",
             (debate_id,),
@@ -150,14 +166,215 @@ class DebateStore:
         Returns:
             List of debate records, most recent first.
         """
-        assert self._db is not None, "Store not initialized"
-        cursor = await self._db.execute(
+        db = _require_db(self._db)
+        cursor = await db.execute(
             "SELECT id, prompt, status, created_at, updated_at "
             "FROM debates ORDER BY created_at DESC LIMIT ?",
-            (limit,),
+            (min(limit, 200),),
         )
         rows = await cursor.fetchall()
         return [dict(r) for r in rows]
+
+    async def list_active_debates(self) -> list[dict]:
+        """List all non-complete debates for state recovery.
+
+        Returns:
+            List of active debate records.
+        """
+        db = _require_db(self._db)
+        cursor = await db.execute(
+            "SELECT id, prompt, status, created_at, updated_at "
+            "FROM debates WHERE status != 'complete' ORDER BY created_at",
+        )
+        rows = await cursor.fetchall()
+        return [dict(r) for r in rows]
+
+    async def update_debate_status(self, debate_id: str, status: str) -> None:
+        """Update a debate's status.
+
+        Args:
+            debate_id: The debate to update.
+            status: New status value.
+        """
+        db = _require_db(self._db)
+        await db.execute(
+            "UPDATE debates SET status = ?, updated_at = datetime('now') WHERE id = ?",
+            (status, debate_id),
+        )
+        await db.commit()
+
+    # ------------------------------------------------------------------
+    # Sessions
+    # ------------------------------------------------------------------
+
+    async def save_session(
+        self, session_id: str, debate_id: str, role: str, base_prompt: str
+    ) -> None:
+        """Persist a new session record.
+
+        Args:
+            session_id: Unique identifier for the session.
+            debate_id: The debate this session belongs to.
+            role: Session role ('experienced' or 'fresh').
+            base_prompt: The decision prompt for this session.
+        """
+        db = _require_db(self._db)
+        await db.execute(
+            "INSERT INTO sessions (id, debate_id, role, base_prompt) VALUES (?, ?, ?, ?)",
+            (session_id, debate_id, role, base_prompt),
+        )
+        await db.commit()
+
+    async def get_sessions(self, debate_id: str) -> list[dict]:
+        """Retrieve all sessions for a debate.
+
+        Args:
+            debate_id: The debate to look up sessions for.
+
+        Returns:
+            List of session records.
+        """
+        db = _require_db(self._db)
+        cursor = await db.execute(
+            "SELECT id, debate_id, role, base_prompt, created_at "
+            "FROM sessions WHERE debate_id = ?",
+            (debate_id,),
+        )
+        rows = await cursor.fetchall()
+        return [dict(r) for r in rows]
+
+    # ------------------------------------------------------------------
+    # Messages
+    # ------------------------------------------------------------------
+
+    async def save_message(
+        self,
+        debate_id: str,
+        session_id: str,
+        phase: str,
+        content: str,
+        action: str | None = None,
+    ) -> None:
+        """Persist a debate message.
+
+        Args:
+            debate_id: The debate this message belongs to.
+            session_id: The session that authored this message.
+            phase: The debate phase when this message was created.
+            content: The message content.
+            action: Optional semantic action classifying the message.
+        """
+        db = _require_db(self._db)
+        await db.execute(
+            "INSERT INTO messages (debate_id, session_id, phase, content, action) "
+            "VALUES (?, ?, ?, ?, ?)",
+            (debate_id, session_id, phase, content, action),
+        )
+        await db.commit()
+
+    async def get_messages(self, debate_id: str) -> list[dict]:
+        """Retrieve all messages for a debate, ordered by creation time.
+
+        Args:
+            debate_id: The debate to look up messages for.
+
+        Returns:
+            List of message records.
+        """
+        db = _require_db(self._db)
+        cursor = await db.execute(
+            "SELECT id, debate_id, session_id, phase, content, action, timestamp "
+            "FROM messages WHERE debate_id = ? ORDER BY id",
+            (debate_id,),
+        )
+        rows = await cursor.fetchall()
+        return [dict(r) for r in rows]
+
+    # ------------------------------------------------------------------
+    # Convergence
+    # ------------------------------------------------------------------
+
+    async def save_convergence(
+        self, debate_id: str, synthesis: str, confidence: float, points_json: str
+    ) -> None:
+        """Persist a convergence result.
+
+        Args:
+            debate_id: The debate this result belongs to.
+            synthesis: The synthesized recommendation.
+            confidence: Confidence score (0.0 to 1.0).
+            points_json: JSON string of convergence points.
+        """
+        db = _require_db(self._db)
+        await db.execute(
+            "INSERT INTO convergence (debate_id, synthesis, confidence, points_json) "
+            "VALUES (?, ?, ?, ?)",
+            (debate_id, synthesis, confidence, points_json),
+        )
+        await db.commit()
+
+    async def get_convergence(self, debate_id: str) -> dict | None:
+        """Retrieve the convergence result for a debate.
+
+        Args:
+            debate_id: The debate to look up.
+
+        Returns:
+            Convergence record as a dict, or None if not found.
+        """
+        db = _require_db(self._db)
+        cursor = await db.execute(
+            "SELECT debate_id, synthesis, confidence, points_json, created_at "
+            "FROM convergence WHERE debate_id = ?",
+            (debate_id,),
+        )
+        row = await cursor.fetchone()
+        if row is None:
+            return None
+        return dict(row)
+
+    # ------------------------------------------------------------------
+    # Transactions
+    # ------------------------------------------------------------------
+
+    async def save_convergence_and_complete(
+        self, debate_id: str, synthesis: str, confidence: float, points_json: str
+    ) -> None:
+        """Atomically save convergence result and mark debate as complete.
+
+        Args:
+            debate_id: The debate to finalize.
+            synthesis: The synthesized recommendation.
+            confidence: Confidence score (0.0 to 1.0).
+            points_json: JSON string of convergence points.
+        """
+        db = _require_db(self._db)
+        await db.execute(
+            "INSERT INTO convergence (debate_id, synthesis, confidence, points_json) "
+            "VALUES (?, ?, ?, ?)",
+            (debate_id, synthesis, confidence, points_json),
+        )
+        await db.execute(
+            "UPDATE debates SET status = 'complete', updated_at = datetime('now') "
+            "WHERE id = ?",
+            (debate_id,),
+        )
+        await db.commit()
+
+    async def delete_debate(self, debate_id: str) -> None:
+        """Permanently delete a debate and all associated data.
+
+        Removes messages, sessions, convergence results, and the debate itself.
+
+        Args:
+            debate_id: The debate to delete.
+        """
+        db = _require_db(self._db)
+        await db.execute("DELETE FROM messages WHERE debate_id = ?", (debate_id,))
+        await db.execute("DELETE FROM convergence WHERE debate_id = ?", (debate_id,))
+        await db.execute("DELETE FROM sessions WHERE debate_id = ?", (debate_id,))
+        await db.execute("DELETE FROM debates WHERE id = ?", (debate_id,))
+        await db.commit()
 
     async def close(self) -> None:
         """Close the database connection."""
