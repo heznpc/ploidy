@@ -129,13 +129,20 @@ async def _recover_state(store: DebateStore) -> None:
             session_ids.append(s["id"])
 
         # Replay messages to reconstruct protocol state
+        phase_order = list(DebatePhase)
         for m in messages:
             phase = DebatePhase(m["phase"])
-            # Advance protocol to match message phase
-            while protocol.phase != phase:
+            # Advance protocol to match message phase, with safety limit
+            advances = 0
+            while protocol.phase != phase and advances < len(phase_order):
                 try:
                     protocol.advance_phase()
+                    advances += 1
                 except ProtocolError:
+                    logger.warning(
+                        "Cannot advance to %s during recovery of debate %s",
+                        phase.value, debate_id,
+                    )
                     break
             action = SemanticAction(m["action"]) if m["action"] else None
             msg = DebateMessage(
@@ -508,7 +515,12 @@ async def debate_converge(debate_id: str) -> dict:
         protocol.advance_phase()  # → CONVERGENCE
 
         engine = ConvergenceEngine()
-        result = await engine.analyze(protocol)
+        session_roles = {
+            sid: _sessions[sid].role.value.capitalize()
+            for sid in _debate_sessions.get(debate_id, [])
+            if sid in _sessions
+        }
+        result = await engine.analyze(protocol, session_roles)
 
         protocol.advance_phase()  # → COMPLETE
 
@@ -732,6 +744,15 @@ def _cleanup_debate(debate_id: str) -> None:
 # ---------------------------------------------------------------------------
 
 
+async def shutdown() -> None:
+    """Close the database connection on server shutdown."""
+    global _store
+    if _store is not None:
+        await _store.close()
+        _store = None
+        logger.info("Database connection closed")
+
+
 def main() -> None:
     """Run the Ploidy MCP server."""
     log_level = os.environ.get("PLOIDY_LOG_LEVEL", "INFO").upper()
@@ -739,4 +760,13 @@ def main() -> None:
         level=getattr(logging, log_level, logging.INFO),
         format="%(asctime)s [%(name)s] %(levelname)s: %(message)s",
     )
+    import atexit
+    import signal
+
+    def _shutdown_handler(sig: int, frame: object) -> None:
+        asyncio.get_event_loop().run_until_complete(shutdown())
+
+    signal.signal(signal.SIGTERM, _shutdown_handler)
+    signal.signal(signal.SIGINT, _shutdown_handler)
+
     mcp.run(transport="streamable-http")

@@ -60,7 +60,11 @@ class ConvergenceEngine:
     agreed or disagreed.
     """
 
-    async def analyze(self, protocol: DebateProtocol) -> ConvergenceResult:
+    async def analyze(
+        self,
+        protocol: DebateProtocol,
+        session_roles: dict[str, str] | None = None,
+    ) -> ConvergenceResult:
         """Run convergence analysis on a completed debate.
 
         Collects positions and challenges, classifies them by semantic action,
@@ -68,6 +72,7 @@ class ConvergenceEngine:
 
         Args:
             protocol: The debate protocol with all messages.
+            session_roles: Optional map of session_id to role display name.
 
         Returns:
             Structured convergence result.
@@ -131,7 +136,9 @@ class ConvergenceEngine:
         agree_count = sum(1 for p in points if p.category == "agreement")
         confidence = agree_count / len(points) if points else 0.0
 
-        synthesis = self._build_synthesis(protocol.prompt, positions, points)
+        synthesis = self._build_synthesis(
+            protocol.prompt, positions, points, session_roles
+        )
 
         return ConvergenceResult(
             debate_id=protocol.debate_id,
@@ -145,6 +152,7 @@ class ConvergenceEngine:
         prompt: str,
         positions: dict[str, str],
         points: list[ConvergencePoint],
+        session_roles: dict[str, str] | None = None,
     ) -> str:
         """Build a human-readable synthesis from debate data.
 
@@ -152,14 +160,16 @@ class ConvergenceEngine:
             prompt: The original debate prompt.
             positions: Map of session_id to position content.
             points: Classified convergence points.
+            session_roles: Optional map of session_id to role name.
 
         Returns:
             Formatted synthesis text.
         """
+        roles = session_roles or {}
         parts = [f"## Debate: {prompt}\n"]
 
         for sid, pos in positions.items():
-            role = "Experienced" if "-exp-" in sid else "Fresh"
+            role = roles.get(sid, f"Session {sid[:8]}")
             parts.append(f"### {role} Session Position\n{pos}\n")
 
         agree = [p for p in points if p.category == "agreement"]
