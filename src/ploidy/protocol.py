@@ -101,9 +101,7 @@ class DebateProtocol:
         """
         next_phase = self.VALID_TRANSITIONS.get(self.phase)
         if next_phase is None:
-            raise ProtocolError(
-                f"Cannot advance from terminal phase {self.phase.value}"
-            )
+            raise ProtocolError(f"Cannot advance from terminal phase {self.phase.value}")
         self.phase = next_phase
         return self.phase
 

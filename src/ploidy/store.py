@@ -148,8 +148,7 @@ class DebateStore:
         """
         db = _require_db(self._db)
         cursor = await db.execute(
-            "SELECT id, prompt, status, created_at, updated_at "
-            "FROM debates WHERE id = ?",
+            "SELECT id, prompt, status, created_at, updated_at FROM debates WHERE id = ?",
             (debate_id,),
         )
         row = await cursor.fetchone()
@@ -236,8 +235,7 @@ class DebateStore:
         """
         db = _require_db(self._db)
         cursor = await db.execute(
-            "SELECT id, debate_id, role, base_prompt, created_at "
-            "FROM sessions WHERE debate_id = ?",
+            "SELECT id, debate_id, role, base_prompt, created_at FROM sessions WHERE debate_id = ?",
             (debate_id,),
         )
         rows = await cursor.fetchall()
@@ -355,8 +353,7 @@ class DebateStore:
             (debate_id, synthesis, confidence, points_json),
         )
         await db.execute(
-            "UPDATE debates SET status = 'complete', updated_at = datetime('now') "
-            "WHERE id = ?",
+            "UPDATE debates SET status = 'complete', updated_at = datetime('now') WHERE id = ?",
             (debate_id,),
         )
         await db.commit()

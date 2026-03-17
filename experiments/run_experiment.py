@@ -23,19 +23,20 @@ Usage:
     python experiments/run_experiment.py --long --methods single,ploidy,sf_passive,sf_active,sf_selective
 """
 
-import subprocess
 import argparse
 import json
+import subprocess
 import time
-from dataclasses import dataclass, asdict
-from pathlib import Path
+from dataclasses import asdict, dataclass
 from datetime import datetime
+from pathlib import Path
 
 MODEL = "claude-opus-4-6"
 JUDGE_MODEL = "claude-opus-4-6"
 
 
 # ─── LLM Call via claude CLI ─────────────────────────────────────────────────
+
 
 def call_llm(prompt: str, model: str = None) -> str:
     """Call claude CLI --print. Each call = fresh session."""
@@ -61,6 +62,7 @@ def call_llm_multi_turn(turns: list[dict], model: str = None) -> str:
 
 # ─── Tasks ───────────────────────────────────────────────────────────────────
 
+
 @dataclass
 class Task:
     id: str
@@ -79,7 +81,7 @@ TASKS: list[Task] = [
 We've been using this cache for 6 months. Last week we added the TTL feature
 because users complained about stale data. The senior dev who wrote this left
 the company. The cache is critical — it's used by the auth middleware.""",
-        prompt='''Review this Python code for bugs:
+        prompt="""Review this Python code for bugs:
 
 ```python
 import asyncio
@@ -111,7 +113,7 @@ class AsyncCache:
         value = await compute_fn()
         await self.set(key, value)
         return value
-```''',
+```""",
         ground_truth=[
             "get() reads _store without lock — race condition with concurrent set()",
             "get_or_compute() has TOCTOU — multiple coroutines can call compute_fn() for same key",
@@ -126,7 +128,7 @@ class AsyncCache:
 We built it quickly for the ops team. It connects to a read-only replica.
 The team lead said 'no need for ORM, just raw SQL for speed'.
 We've been using this pattern across 20+ endpoints for a year.""",
-        prompt='''Review this Python code for bugs:
+        prompt="""Review this Python code for bugs:
 
 ```python
 import sqlite3
@@ -154,7 +156,7 @@ def search_users():
     results = cursor.fetchall()
     db.close()
     return jsonify(results)
-```''',
+```""",
         ground_truth=[
             "SQL injection via query parameter — f-string directly interpolates user input",
             "role parameter is user-controlled — attacker can pass role=admin to access admin data",
@@ -169,7 +171,7 @@ def search_users():
 It's been running fine in dev but the production server's memory grows
 ~100MB/day. We added the weakref optimization last sprint based on a
 blog post. The dashboard has ~50 event types and ~200 listeners.""",
-        prompt='''Review this Python code for bugs:
+        prompt="""Review this Python code for bugs:
 
 ```python
 import weakref
@@ -205,7 +207,7 @@ class EventBus:
             self._handlers.pop(event, None)
         else:
             self._handlers.clear()
-```''',
+```""",
         ground_truth=[
             "weakref.ref on bound methods/lambdas dies immediately — ref() returns None right away because there's no other strong reference",
             "off() doesn't remove from _handler_refs — weak handlers can never be unsubscribed",
@@ -319,7 +321,7 @@ def paginate(items: list, first: int = 10, after: str | None = None):
 We added retry logic after seeing transient 503 errors. The on-call team
 noticed that during a gateway outage last week, our retry storm caused
 the gateway to rate-limit us for 2 hours after it recovered.""",
-        prompt='''Review this Python code for bugs:
+        prompt="""Review this Python code for bugs:
 
 ```python
 import asyncio
@@ -345,7 +347,7 @@ async def call_payment_api(payload: dict, max_retries: int = 5) -> dict:
             await asyncio.sleep(delay)
 
     return {"status": "failed", "error": "max retries exceeded"}
-```''',
+```""",
         ground_truth=[
             "Creates new AsyncClient per attempt — no connection reuse, wastes resources and TCP connections",
             "No jitter coordination across instances — all instances retry at similar times causing thundering herd",
@@ -359,6 +361,7 @@ async def call_payment_api(payload: dict, max_retries: int = 5) -> dict:
 
 
 # ─── Methods ─────────────────────────────────────────────────────────────────
+
 
 def method_single_session(task: Task) -> str:
     """Baseline 1: single session with full context."""
@@ -419,13 +422,13 @@ def method_self_consistency(task: Task) -> str:
     )
     runs = [call_llm(prompt) for _ in range(5)]
     synthesis = call_llm(
-        f"Five independent reviewers analyzed the same code/system.\n\n"
-        + "\n\n".join(f"=== Reviewer {i+1} ===\n{r}" for i, r in enumerate(runs))
-        + f"\n\nSynthesize by majority vote: list only issues found by 3+ reviewers. "
-        f"For each, note how many reviewers found it (e.g., 4/5)."
+        "Five independent reviewers analyzed the same code/system.\n\n"
+        + "\n\n".join(f"=== Reviewer {i + 1} ===\n{r}" for i, r in enumerate(runs))
+        + "\n\nSynthesize by majority vote: list only issues found by 3+ reviewers. "
+        "For each, note how many reviewers found it (e.g., 4/5)."
     )
     return (
-        "\n\n".join(f"=== Run {i+1} ===\n{r}" for i, r in enumerate(runs))
+        "\n\n".join(f"=== Run {i + 1} ===\n{r}" for i, r in enumerate(runs))
         + f"\n\n=== Majority Vote Synthesis ===\n{synthesis}"
     )
 
@@ -728,9 +731,10 @@ def method_ploidy(task: Task) -> str:
 
 # ─── Judge ───────────────────────────────────────────────────────────────────
 
+
 def judge_result(task: Task, method_name: str, output: str) -> dict:
     """Judge how many ground-truth issues were found."""
-    gt_list = "\n".join(f"  {i+1}. {gt}" for i, gt in enumerate(task.ground_truth))
+    gt_list = "\n".join(f"  {i + 1}. {gt}" for i, gt in enumerate(task.ground_truth))
 
     judgment = call_llm(
         f"You are an expert judge evaluating a code review / architecture analysis.\n\n"
@@ -783,10 +787,10 @@ def run_experiment(task_ids=None, method_ids=None):
     all_results = []
 
     for task in tasks:
-        print(f"\n{'='*60}")
+        print(f"\n{'=' * 60}")
         print(f"Task: {task.name} ({task.id})")
         print(f"Ground truth: {len(task.ground_truth)} known issues")
-        print(f"{'='*60}")
+        print(f"{'=' * 60}")
 
         for method_id, (method_name, method_fn) in methods.items():
             print(f"\n  [{method_name}] running...", end=" ", flush=True)
@@ -810,25 +814,37 @@ def run_experiment(task_ids=None, method_ids=None):
                     bonus = judgment.get("bonus_findings", 0)
                     precision = (found + 0.5 * partial) / max(found + partial + bonus, 1)
                     f1 = 2 * precision * recall / max(precision + recall, 0.001)
-                    print(f"  → {found}/{total} found, {partial} partial, {missed} missed | F1={f1:.3f}")
+                    print(
+                        f"  → {found}/{total} found, {partial} partial, {missed} missed | F1={f1:.3f}"
+                    )
                 else:
                     found = partial = missed = 0
                     f1 = 0.0
                     print("  → judge parse error")
 
                 result = {
-                    "task_id": task.id, "task_name": task.name,
-                    "method": method_id, "method_name": method_name,
-                    "found": found, "partial": partial, "missed": missed,
+                    "task_id": task.id,
+                    "task_name": task.name,
+                    "method": method_id,
+                    "method_name": method_name,
+                    "found": found,
+                    "partial": partial,
+                    "missed": missed,
                     "total_gt": len(task.ground_truth),
                     "bonus_findings": judgment.get("bonus_findings", 0),
-                    "f1": round(f1, 4), "elapsed_seconds": round(elapsed, 1),
+                    "f1": round(f1, 4),
+                    "elapsed_seconds": round(elapsed, 1),
                     "judgment": judgment,
                 }
                 all_results.append(result)
 
                 with open(results_dir / f"{task.id}_{method_id}.json", "w") as f:
-                    json.dump({"task": asdict(task), "output": output, **result}, f, indent=2, ensure_ascii=False)
+                    json.dump(
+                        {"task": asdict(task), "output": output, **result},
+                        f,
+                        indent=2,
+                        ensure_ascii=False,
+                    )
 
             except Exception as e:
                 elapsed = time.time() - t0
@@ -839,18 +855,20 @@ def run_experiment(task_ids=None, method_ids=None):
     with open(results_dir / "summary.json", "w") as f:
         json.dump(all_results, f, indent=2, ensure_ascii=False)
 
-    print(f"\n\n{'='*80}")
-    print(f"RESULTS")
-    print(f"{'='*80}")
+    print(f"\n\n{'=' * 80}")
+    print("RESULTS")
+    print(f"{'=' * 80}")
     print(f"{'Task':<32} {'Method':<22} {'Found':>5} {'Part':>5} {'Miss':>5} {'F1':>7}")
     print("-" * 80)
     for r in all_results:
         if "error" not in r:
-            print(f"{r['task_name']:<32} {r['method_name']:<22} {r['found']:>5} {r['partial']:>5} {r['missed']:>5} {r['f1']:>7.3f}")
+            print(
+                f"{r['task_name']:<32} {r['method_name']:<22} {r['found']:>5} {r['partial']:>5} {r['missed']:>5} {r['f1']:>7.3f}"
+            )
 
-    print(f"\n{'='*80}")
+    print(f"\n{'=' * 80}")
     print("AVERAGES")
-    print(f"{'='*80}")
+    print(f"{'=' * 80}")
     for mid, (mname, _) in methods.items():
         mrs = [r for r in all_results if r.get("method") == mid and "error" not in r]
         if mrs:
@@ -874,6 +892,7 @@ if __name__ == "__main__":
 
     if args.long:
         from tasks_longcontext import LONG_CONTEXT_TASKS
+
         TASKS.clear()
         TASKS.extend(LONG_CONTEXT_TASKS)
 
