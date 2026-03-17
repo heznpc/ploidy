@@ -5,8 +5,7 @@ This guide walks you through installing Ploidy and running your first cross-sess
 ## Prerequisites
 
 - **Python 3.11 or later**
-- **An MCP-compatible AI client** -- Claude Code, Claude Desktop, or any client that supports Streamable HTTP transport
-- **Two terminal windows** (for the two-terminal debate flow)
+- **Two terminal windows** with an MCP-compatible AI client (Claude Code, Claude Desktop, etc.)
 
 ## Installation
 
@@ -22,19 +21,37 @@ cd ploidy
 pip install -e .
 ```
 
-## MCP Client Configuration
+## Step 1: Start the Server
 
-Add Ploidy to your MCP client's server configuration. The exact location depends on your client.
+```bash
+python -m ploidy
+```
 
-=== "Claude Code"
+The server starts on `http://localhost:8765/mcp` using Streamable HTTP transport. Leave this running.
 
-    Add to your project's `.mcp.json` or global MCP config:
+**Environment variables** (all optional):
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `PLOIDY_PORT` | `8765` | Server port |
+| `PLOIDY_DB_PATH` | `~/.ploidy/ploidy.db` | SQLite database path |
+| `PLOIDY_LOG_LEVEL` | `INFO` | Logging level |
+| `PLOIDY_AUTH_TOKEN` | *(none)* | Bearer token for auth (if set, all requests require it) |
+| `PLOIDY_MAX_SESSIONS` | `5` | Max sessions per debate |
+
+## Step 2: Configure MCP Clients
+
+Both terminals need to connect to the same Ploidy server. Add to your MCP config:
+
+=== "Claude Code (.mcp.json)"
 
     ```json
     {
-      "ploidy": {
-        "type": "streamable-http",
-        "url": "http://localhost:8765/mcp"
+      "mcpServers": {
+        "ploidy": {
+          "type": "streamable-http",
+          "url": "http://localhost:8765/mcp"
+        }
       }
     }
     ```
@@ -54,82 +71,82 @@ Add Ploidy to your MCP client's server configuration. The exact location depends
     }
     ```
 
-=== "Other MCP Clients"
+## Step 3: Run Your First Debate
 
-    Any MCP client that supports Streamable HTTP transport can connect to:
+### Terminal 1 — The Deep Session
 
-    ```
-    http://localhost:8765/mcp
-    ```
+Open your MCP client in a terminal where you have project context. Tell the AI:
 
-## Start the Server
+> "Start a Ploidy debate: Should we use monorepo or polyrepo for our microservices?"
 
-Before opening your AI client sessions, start the Ploidy server:
+The AI calls `debate_start` and gets back a `debate_id` like `a1b2c3d4e5f6`.
 
-```bash
-ploidy
-```
+### Terminal 2 — The Fresh Session
 
-The server starts on port 8765 using Streamable HTTP transport. Both terminals will connect to this single server instance.
+Open a **new, clean** MCP client session. Tell the AI:
 
-## Your First Debate
+> "Join Ploidy debate a1b2c3d4e5f6"
 
-### Step 1: Open Terminal 1 (the Deep session)
+The Fresh session receives **only the debate prompt** — no project context.
 
-Open your MCP client in a terminal where you've been working on your project. This session has accumulated context -- it knows your codebase, your prior decisions, your constraints.
+### The Debate Unfolds
 
-Start a debate:
+Both sessions go through the protocol automatically:
 
 ```
-ploidy start "Should we use monorepo or polyrepo for our microservices?"
+INDEPENDENT → POSITION → CHALLENGE → CONVERGENCE → COMPLETE
 ```
 
-The server creates a debate and returns a debate ID (e.g., `debate-a1b2c3d4`).
+1. **Position** — Each AI independently analyzes the question and submits a stance
+2. **Challenge** — Each AI reads the other's position and responds with a semantic action:
+    - `agree` — "I reached the same conclusion"
+    - `challenge` — "I disagree, here's why"
+    - `propose_alternative` — "Neither is right, consider this"
+    - `synthesize` — "Both have merit, here's a synthesis"
+3. **Converge** — Either session triggers convergence analysis
 
-### Step 2: Open Terminal 2 (the Fresh session)
-
-Open a **new** MCP client instance in a separate terminal. This is a fresh session with no prior context.
-
-Join the debate using the ID from Step 1:
-
-```
-ploidy join debate-a1b2c3d4
-```
-
-The Fresh session receives only the debate prompt -- no project context, no prior decisions, no accumulated assumptions.
-
-### Step 3: The Debate Protocol
-
-Both sessions proceed through the structured protocol:
-
-1. **Position** -- Each session independently analyzes the decision and submits their stance
-2. **Challenge** -- Each session critiques the other's position using semantic actions (`agree`, `challenge`, `propose_alternative`, `synthesize`)
-3. **Converge** -- The server synthesizes positions into a structured result
-
-### Step 4: Review the Result
+### Review the Result
 
 The convergence result includes:
 
-- **Agreements** -- Points where both sessions independently reached the same conclusion
-- **Productive disagreements** -- Points where the Fresh session's lack of context revealed a valid concern
-- **Irreducible disagreements** -- Genuinely different priorities that require a human decision
-- **Synthesis** -- An overall recommendation with a confidence score
+- **Agreements** — Points where both sessions independently converged
+- **Productive disagreements** — Fresh session's lack of context revealed a valid concern
+- **Irreducible disagreements** — Different priorities requiring a human decision
+- **Confidence score** — 0.0 (full disagreement) to 1.0 (full agreement)
 
-## What to Expect
+## Available Tools
 
-!!! info "Pre-alpha status"
+| Tool | Description |
+|------|-------------|
+| `debate_start` | Begin a debate with a prompt |
+| `debate_join` | Join as a fresh session |
+| `debate_position` | Submit your stance |
+| `debate_challenge` | Critique the other's position |
+| `debate_converge` | Trigger convergence analysis |
+| `debate_status` | Check current state and messages |
+| `debate_cancel` | Cancel an in-progress debate |
+| `debate_delete` | Permanently delete a debate |
+| `debate_history` | List past debates |
 
-    Ploidy is in early development. The server starts, MCP tools are registered, and the protocol is defined. The full debate orchestration and convergence engine are being implemented. Expect rough edges and breaking changes.
+## Docker
 
-What works today:
+```bash
+docker compose up
+```
 
-- Server starts and accepts MCP connections via Streamable HTTP
-- All six debate tools are registered and callable
-- Debate protocol state machine is defined
+Or build and run directly:
 
-What is coming:
+```bash
+docker build -t ploidy .
+docker run -p 8765:8765 -v ploidy-data:/data ploidy
+```
 
-- Full debate orchestration across sessions
-- Convergence engine with structured synthesis
-- Persistent debate history via SQLite
-- API fallback mode for single-terminal use (v0.2)
+## Example Debate Prompts
+
+Architecture decisions work best because they have clear trade-offs:
+
+- "Should we use monorepo or polyrepo for 12 microservices with a shared auth library?"
+- "REST vs gRPC for internal service communication?"
+- "SQLite vs PostgreSQL for a tool that starts local but may scale to multi-user?"
+- "Should we migrate from Express to Fastify?"
+- "Serverless functions vs containerized services for our event processing pipeline?"

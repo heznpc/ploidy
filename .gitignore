@@ -48,3 +48,9 @@ docs/ko/
 
 # Claude Code config (local only)
 CLAUDE.md
+
+# Internal research notes (local only)
+docs/internal/
+
+# Experiment results (large, local only)
+experiments/results/

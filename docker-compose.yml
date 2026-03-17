@@ -1,0 +1,12 @@
+services:
+  ploidy:
+    build: .
+    ports:
+      - "8765:8765"
+    volumes:
+      - ploidy-data:/data
+    environment:
+      PLOIDY_LOG_LEVEL: INFO
+
+volumes:
+  ploidy-data:
