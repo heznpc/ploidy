@@ -38,6 +38,23 @@ context 비대칭의 구조화된 충돌이 동질적 에이전트 확장보다
 - **Christensen (1997)**: Innovator's Dilemma — 기존 기업이 "합리적으로"
   파괴적 혁신을 놓치는 것은 축적된 의사결정 컨텍스트 자체가 편향
 
+### 1.1b Expanded Prose (from Ploidy draft, moved here)
+
+The parallel extends beyond scientists. If we map **context to lifespan** — treating
+accumulated knowledge as a growing context window and cognitive capacity as a fixed
+model — then a structural analogy (though not a mechanistic isomorphism) emerges with
+human civilization more broadly. Every individual is an instance of the same model
+(homo sapiens) with roughly equivalent architecture (intelligence), differing only in
+session (environment, era, culture). Each person begins with a fresh context,
+stochastically accumulates a unique trajectory of beliefs and expertise, and becomes
+progressively anchored to that trajectory. Innovation and paradigm shifts occur not
+because individuals overcome their accumulated priors — Kuhn and Azoulay's evidence
+suggests they largely do not — but because new individuals (fresh contexts) evaluate
+the same evidence without the anchoring of prior commitment. Human civilization's
+capacity for renewal depends structurally on this generational context asymmetry:
+the continuous introduction of sessions that do not inherit the entrenched context
+of their predecessors.
+
 ### 1.2 The LLM as Controllable Analog
 
 LLM의 context window는 이 현상의 최초의 통제 가능한 실험 환경이다:
@@ -150,6 +167,26 @@ N 세대에 걸쳐 context를 누적하는 에이전트 집단에서,
 - 인간의 패러다임 전환은 조직적/정치적 요인 포함.
   LLM은 순수하게 정보 처리 수준의 현상.
 
+### 3.5 Model Collapse as the Absence of Generational Turnover
+
+Planck 원리가 인간 문명에서 작동하는 이유는 새 세대가 이전 세대의 컨텍스트를
+**완전히 물려받지 않기** 때문이다. AI에서는 정반대의 동역학이 발생한다:
+이전 모델의 출력으로 훈련하면 각 세대가 이전 세대의 편향을 그대로 상속하며,
+고착된 관점을 자연스럽게 소멸시킬 "장례식"(funeral)이 결코 발생하지 않는다.
+
+Model collapse [Shumailov et al., Nature 2024]는 이 프레이밍에서
+**세대 간 컨텍스트 비대칭이 없는 문명의 귀결**이다.
+
+| | 인간 세대 교체 | AI 모델/세션 계승 |
+|---|---|---|
+| 새 세대의 컨텍스트 | Fresh — 다른 환경, 다른 경험 | Inherited — 이전 세대 출력으로 훈련 |
+| 상속되는 편향 | 부분적 — 일부 문화 전승, 대부분 소실 | 전면적 — 훈련 데이터가 편향을 보존·증폭 |
+| "장례식"의 역할 (Planck) | 고착된 관점을 자연 소멸 | 부재 — 이전 출력이 훈련 코퍼스에 영구 지속 |
+| 결과 | 세대 간 컨텍스트 비대칭이 패러다임 전환 가능케 함 | Model collapse — 세대 간 점진적 동질화 |
+
+**이것이 Paper 1의 독자적 기여**: 단일 의사결정의 편향 해소(Ploidy, Paper 2)를 넘어,
+**model collapse를 세대적 컨텍스트 비대칭의 부재로 재해석**하는 프레이밍을 제공한다.
+
 ### 3.4 The Scaling Critique
 
 MiroFish 류의 대규모 시뮬레이션에 대한 체계적 비판:
@@ -247,6 +284,22 @@ threshold 이후 급격히 증가, 포화.
 대안: **context diversity를 의도적으로 설계하라.**
 Fresh perspective를 주기적으로 도입하는 것이
 에이전트 수를 10배 늘리는 것보다 의사결정 품질에 기여한다.
+
+이것은 조직 현상에서도 관찰된다: 깊은 도메인 전문성과 축적된 commitment를 가진
+기존 팀은 더 크거나 경험 많은 경쟁자가 아니라,
+기존 상태를 합리적으로 보이게 만드는 컨텍스트를 갖지 않은 외부인에 의해
+disrupted된다 [Christensen, 1997; Azoulay et al., 2019].
+
+Boca et al. (Science Advances, 2025)은 LLM 집단이 상호작용을 통해
+개인 수준 편향 없이도 집단 편향을 자발적으로 발전시킴을 보였다 —
+이것은 세대 간 동질화(model collapse)의 **세대 내 analog**이다.
+
+**설계 원칙**: 같은 prior를 공유하는 에이전트 수를 늘리는 것은
+편향된 분포에서의 샘플링을 스케일링할 뿐이다.
+소수의 의도적으로 다른 context depth를 가진 세션이
+대규모 동질 집단보다 나은 의사결정을 생산할 수 있다 —
+단, 컨텍스트 차이가 불일치를 평균화하는 것이 아니라
+표면화하고 조정하는 프로토콜을 통해 구조화될 때에만.
 
 ### 6.2 Implications for Human Organizations
 

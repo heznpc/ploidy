@@ -1,7 +1,8 @@
 # Research Program: Context Asymmetry as Innovation Mechanism
 
-> 2026-03-17 / heznpc
+> 2026-03-17 / heznpc (updated 2026-03-17: separation executed)
 > Three papers, one thesis: accumulated context is simultaneously knowledge and bias.
+> **Status**: Paper 1/2/3 content formally separated. Draft-v2 now focused on Ploidy mechanism only.
 
 ---
 
@@ -69,7 +70,7 @@ LLM의 context window는 이 과정의 최초의 통제 가능한 실험 환경�
 
 **타겟 학회**: AAAI (AI & Society), Computational Social Science, AAMAS
 
-**상태**: 아이디어 단계 → 아웃라인 작성 필요
+**상태**: 아웃라인 완성 + Ploidy draft에서 이전된 소재 흡수 완료 → 실험 설계 단계
 
 ---
 
@@ -107,7 +108,7 @@ LLM의 context window는 이 과정의 최초의 통제 가능한 실험 환경�
 
 **타겟 학회**: NeurIPS 2026 Workshop (단기), AAMAS 2027 (장기)
 
-**상태**: Draft v1 완료, 교수진 리뷰 완료 → v2 작업 필요
+**상태**: Draft v2 완료 + Paper 1 소재 분리 완료 → 기술 논문에 집중, 통계 보강 단계
 
 ---
 
