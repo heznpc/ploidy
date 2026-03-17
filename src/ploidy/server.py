@@ -114,10 +114,7 @@ async def _recover_state(store: DebateStore) -> None:
 
         session_ids = []
         for s in sessions:
-            role = (
-                SessionRole.EXPERIENCED if s["role"] == "experienced"
-                else SessionRole.FRESH
-            )
+            role = SessionRole.EXPERIENCED if s["role"] == "experienced" else SessionRole.FRESH
             ctx = SessionContext(
                 session_id=s["id"],
                 role=role,
@@ -141,7 +138,8 @@ async def _recover_state(store: DebateStore) -> None:
                 except ProtocolError:
                     logger.warning(
                         "Cannot advance to %s during recovery of debate %s",
-                        phase.value, debate_id,
+                        phase.value,
+                        debate_id,
                     )
                     break
             action = SemanticAction(m["action"]) if m["action"] else None
@@ -157,8 +155,7 @@ async def _recover_state(store: DebateStore) -> None:
         # If all positions are in, advance to challenge
         if protocol.phase == DebatePhase.POSITION:
             position_sessions = {
-                m.session_id for m in protocol.messages
-                if m.phase == DebatePhase.POSITION
+                m.session_id for m in protocol.messages if m.phase == DebatePhase.POSITION
             }
             if len(session_ids) >= 2 and set(session_ids) <= position_sessions:
                 try:
@@ -198,9 +195,7 @@ def _now() -> str:
 def _validate_length(text: str, max_len: int, field: str) -> None:
     """Validate text length, raise ProtocolError if exceeded."""
     if len(text) > max_len:
-        raise ProtocolError(
-            f"{field} exceeds maximum length ({len(text)} > {max_len})"
-        )
+        raise ProtocolError(f"{field} exceeds maximum length ({len(text)} > {max_len})")
 
 
 # ---------------------------------------------------------------------------
@@ -215,9 +210,7 @@ def _validate_length(text: str, max_len: int, field: str) -> None:
         idempotentHint=False,
     ),
 )
-async def debate_start(
-    prompt: str, context_documents: list[str] | None = None
-) -> dict:
+async def debate_start(prompt: str, context_documents: list[str] | None = None) -> dict:
     """Begin a new debate session with a decision prompt.
 
     Creates a debate and an experienced (deep-context) session.
@@ -235,9 +228,7 @@ async def debate_start(
     _validate_length(prompt, _MAX_PROMPT_LEN, "prompt")
     docs = context_documents or []
     if len(docs) > _MAX_CONTEXT_DOCS:
-        raise ProtocolError(
-            f"Too many context documents ({len(docs)} > {_MAX_CONTEXT_DOCS})"
-        )
+        raise ProtocolError(f"Too many context documents ({len(docs)} > {_MAX_CONTEXT_DOCS})")
     for i, doc in enumerate(docs):
         _validate_length(doc, _MAX_CONTENT_LEN, f"context_documents[{i}]")
 
@@ -302,8 +293,7 @@ async def debate_join(debate_id: str) -> dict:
     current_count = len(_debate_sessions.get(debate_id, []))
     if current_count >= _MAX_SESSIONS_PER_DEBATE:
         raise ProtocolError(
-            f"Debate already has {current_count} sessions "
-            f"(max {_MAX_SESSIONS_PER_DEBATE})"
+            f"Debate already has {current_count} sessions (max {_MAX_SESSIONS_PER_DEBATE})"
         )
 
     fresh_id = f"{debate_id}-fresh-{uuid.uuid4().hex[:6]}"
@@ -367,9 +357,7 @@ async def debate_position(session_id: str, content: str) -> dict:
             protocol.advance_phase()
 
         if protocol.phase != DebatePhase.POSITION:
-            raise ProtocolError(
-                f"Cannot submit position in phase {protocol.phase.value}"
-            )
+            raise ProtocolError(f"Cannot submit position in phase {protocol.phase.value}")
 
         msg = DebateMessage(
             session_id=session_id,
@@ -381,19 +369,13 @@ async def debate_position(session_id: str, content: str) -> dict:
         await store.save_message(debate_id, session_id, "position", content)
 
         session_ids = set(_debate_sessions[debate_id])
-        submitted = {
-            m.session_id
-            for m in protocol.messages
-            if m.phase == DebatePhase.POSITION
-        }
+        submitted = {m.session_id for m in protocol.messages if m.phase == DebatePhase.POSITION}
         all_in = len(session_ids) >= 2 and session_ids <= submitted
 
         if all_in:
             protocol.advance_phase()
 
-    logger.info(
-        "Position from %s in debate %s (all_in=%s)", session_id, debate_id, all_in
-    )
+    logger.info("Position from %s in debate %s (all_in=%s)", session_id, debate_id, all_in)
 
     return {
         "session_id": session_id,
@@ -412,9 +394,7 @@ async def debate_position(session_id: str, content: str) -> dict:
         idempotentHint=False,
     ),
 )
-async def debate_challenge(
-    session_id: str, content: str, action: str = "challenge"
-) -> dict:
+async def debate_challenge(session_id: str, content: str, action: str = "challenge") -> dict:
     """Submit a challenge to another session's position.
 
     Records a session's critique during the CHALLENGE phase.
@@ -441,16 +421,13 @@ async def debate_challenge(
         protocol = _protocols[debate_id]
 
         if protocol.phase != DebatePhase.CHALLENGE:
-            raise ProtocolError(
-                f"Cannot submit challenge in phase {protocol.phase.value}"
-            )
+            raise ProtocolError(f"Cannot submit challenge in phase {protocol.phase.value}")
 
         try:
             semantic_action = SemanticAction(action)
         except ValueError:
             raise ProtocolError(
-                "Invalid action. "
-                "Must be one of: agree, challenge, propose_alternative, synthesize"
+                "Invalid action. Must be one of: agree, challenge, propose_alternative, synthesize"
             )
 
         msg = DebateMessage(
@@ -463,9 +440,7 @@ async def debate_challenge(
         protocol.submit_message(msg)
         await store.save_message(debate_id, session_id, "challenge", content, action)
 
-    logger.info(
-        "Challenge from %s in debate %s (action=%s)", session_id, debate_id, action
-    )
+    logger.info("Challenge from %s in debate %s (action=%s)", session_id, debate_id, action)
 
     return {
         "session_id": session_id,
@@ -508,8 +483,7 @@ async def debate_converge(debate_id: str) -> dict:
     async with lock:
         if protocol.phase != DebatePhase.CHALLENGE:
             raise ProtocolError(
-                f"Cannot converge from phase {protocol.phase.value}, "
-                f"must be in CHALLENGE"
+                f"Cannot converge from phase {protocol.phase.value}, must be in CHALLENGE"
             )
 
         protocol.advance_phase()  # → CONVERGENCE
@@ -760,7 +734,6 @@ def main() -> None:
         level=getattr(logging, log_level, logging.INFO),
         format="%(asctime)s [%(name)s] %(levelname)s: %(message)s",
     )
-    import atexit
     import signal
 
     def _shutdown_handler(sig: int, frame: object) -> None:

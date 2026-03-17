@@ -82,8 +82,7 @@ class ConvergenceEngine:
         """
         if protocol.phase != DebatePhase.CONVERGENCE:
             raise ConvergenceError(
-                f"Cannot analyze: debate is in {protocol.phase.value}, "
-                f"expected convergence"
+                f"Cannot analyze: debate is in {protocol.phase.value}, expected convergence"
             )
 
         positions: dict[str, str] = {}
@@ -116,9 +115,7 @@ class ConvergenceEngine:
                     summary=ch.content[:300],
                     session_a_view=own_view[:500],
                     session_b_view=other_view[:500],
-                    resolution=(
-                        ch.content if action == SemanticAction.SYNTHESIZE else None
-                    ),
+                    resolution=(ch.content if action == SemanticAction.SYNTHESIZE else None),
                 )
             )
 
@@ -136,9 +133,7 @@ class ConvergenceEngine:
         agree_count = sum(1 for p in points if p.category == "agreement")
         confidence = agree_count / len(points) if points else 0.0
 
-        synthesis = self._build_synthesis(
-            protocol.prompt, positions, points, session_roles
-        )
+        synthesis = self._build_synthesis(protocol.prompt, positions, points, session_roles)
 
         return ConvergenceResult(
             debate_id=protocol.debate_id,
