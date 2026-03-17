@@ -2,45 +2,90 @@
 
 **Same model, different context depths, better decisions.**
 
+Ploidy is a structured debate protocol between physically separate sessions of the same LLM with intentionally asymmetric context depths. Unlike multi-model approaches that rely on model diversity, Ploidy exploits **context diversity** within a single model.
+
+The name draws from biological polyploidy, where gene duplication provides redundancy that enables both error tolerance and functional diversification.
+
 ---
 
-## What is Ploidy?
+## The Problem: Stochastic Prior Lock-in
 
-Ploidy is an MCP server that orchestrates **structured debates between multiple sessions of the same AI model** -- each with intentionally different amounts of context.
+When you ask the same model the same question in different sessions, you get different answers. If you only use one session, that first stochastic response anchors all subsequent reasoning. Prompt-based mitigations (chain-of-thought, reflection, "think again") have **no statistically significant effect** on this anchoring bias.
 
-You open two terminals. Terminal 1 has been working on your project for hours -- it knows your codebase, your constraints, your prior decisions. Terminal 2 starts completely fresh. They debate a decision through a structured protocol, and because context is the *only* variable, every disagreement tells you something specific: Terminal 1 is anchored on something Terminal 2 questions, or Terminal 2 is missing context that Terminal 1 has.
+A user confined to a single session is unknowingly subject to a stochastic lottery.
 
-The result is a structured synthesis -- not a majority vote, but an interpretable map of agreements, productive disagreements, and irreducible differences.
+## The Mechanism: Context Asymmetry Spectrum
 
-## Why Context Asymmetry Matters
+Ploidy introduces a 2D framework for multi-session verification:
 
-When you've been deep in a project, your AI assistant has absorbed your assumptions along with your context. It knows your prior decisions and tends to build on them rather than question them. This is the **chat-chamber effect**: the longer a session runs, the more it reinforces its own framing.
+| | Passive (in prompt) | Active (on request) | None |
+|---|---|---|---|
+| **Full context** | Deep | Deep-Active | -- |
+| **Compressed** | Semi-Fresh-Passive | Semi-Fresh-Active | -- |
+| **None** | -- | -- | Fresh |
 
-Traditional multi-agent debate (MAD) tries to fix this by pitting *different models* against each other. But when GPT-4 disagrees with Claude, you can't tell if it's a meaningful difference or just a quirk of training data.
+Two terminals connect to one Ploidy MCP server. Terminal 1 (Deep) has full project context. Terminal 2 (Fresh) starts clean. They debate through typed semantic actions (`agree`, `challenge`, `propose_alternative`, `synthesize`) before a convergence phase.
 
-Ploidy takes a different approach: **same model, different context**. When two sessions of the same model disagree, the cause is clear -- one has context the other doesn't. That's a signal you can act on.
+## Key Finding: Primacy Anchoring Effect
 
-## Quick Example
+In factorial ablation experiments across 10 tasks and 11 methods, we identified **information position as the dominant factor** in context delivery:
+
+| Condition | Summary Position | Instruction | Avg Recall |
+|---|---|---|---|
+| SF-Passive | Top | No | 89% |
+| SF-Passive+Independent | Top | Yes | 94% |
+| **SF-Passive+Bottom** | **Bottom** | No | **100%** |
+| SF-Active | Bottom | Yes | 100% |
+
+Moving a compressed summary from the top to the bottom of the prompt improves recall from 89% to 100% (+11pp) -- with no other changes. This is consistent with primacy anchoring effects in human cognition.
+
+!!! info "Pilot study caveat"
+    These results are from 10 tasks with single runs per condition. Statistical validation with 30+ tasks and 5+ runs is in progress.
+
+## Architecture
+
+```
+Terminal A (Deep)              Terminal B (Fresh)
+   | debate/start                | debate/join
+   | debate/position             | debate/position
+   | debate/challenge            | debate/challenge
+   | debate/converge
+        |
+   Ploidy Server (FastMCP, Streamable HTTP :8765)
+        |
+   SQLite (WAL, ~/.ploidy/ploidy.db)
+```
+
+5-phase protocol: `INDEPENDENT` -> `POSITION` -> `CHALLENGE` -> `CONVERGENCE` -> `COMPLETE`
+
+## Paper
+
+**Ploidy: Context-Asymmetric Structured Debate for LLM Decision Verification**
+
+- [Paper (LaTeX source)](https://github.com/heznpc/ploidy/tree/main/paper/latex)
+- [Experiment code](https://github.com/heznpc/ploidy/blob/main/experiments/run_experiment.py)
+- [Experiment results (100+ JSON)](https://github.com/heznpc/ploidy/tree/main/experiments/results)
+
+Target venues: ICML 2026 Workshop, NeurIPS 2026, AAMAS 2027
+
+24 references including CCR, AceMAD, SR-DCR, and 6 cognitive science papers (generation effect, directed forgetting, incubation, testing effect, primacy anchoring).
+
+## Quick Start
 
 ```bash
-# Terminal 1 -- you've been working here for an hour
-# Start a debate about a decision you're facing
-ploidy start "Should we use monorepo or polyrepo?"
+pip install ploidy
+ploidy serve  # starts MCP server on :8765
+```
 
-# Terminal 2 -- fresh session, no prior context
-# Join the debate with just the prompt
+```bash
+# Terminal 1 (Deep session)
+ploidy start "Should we migrate from PostgreSQL to TimescaleDB?"
+
+# Terminal 2 (Fresh session)
 ploidy join debate-xxxx
 ```
 
-Both terminals connect to the same Ploidy MCP server. They go through a structured protocol: independent analysis, position statements, challenges, and convergence. The output is a `DECISIONS.md` entry with the synthesized result.
-
-## Current Status
-
-!!! warning "Pre-alpha"
-
-    Ploidy is in early development. The server runs, the debate protocol is defined, and MCP tools are registered. The full debate orchestration, convergence engine, and persistence layer are under active implementation.
-
-## Next Steps
+## Documentation
 
 <div class="grid cards" markdown>
 
@@ -50,7 +95,7 @@ Both terminals connect to the same Ploidy MCP server. They go through a structur
 
 - [:material-lightbulb-on: **How It Works**](how-it-works.md)
 
-    Understand the core concept and why it matters.
+    Core concept and why context asymmetry matters.
 
 - [:material-file-tree: **Architecture**](architecture.md)
 
@@ -60,4 +105,12 @@ Both terminals connect to the same Ploidy MCP server. They go through a structur
 
     Complete MCP tool reference.
 
+- [:material-flask: **Research**](research.md)
+
+    Experimental design, results, and related work.
+
 </div>
+
+---
+
+MIT License | [GitHub](https://github.com/heznpc/ploidy) | heznpc

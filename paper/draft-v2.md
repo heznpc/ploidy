@@ -82,6 +82,8 @@ Claude Agent Teams and similar systems (CrewAI, MetaGPT) implement cooperative d
 
 ## 3. The Ploidy Protocol
 
+The name *Ploidy* draws from biological polyploidy, where gene duplication provides redundancy that enables both error tolerance and functional diversification — an analogy to our use of session duplication with deliberate context diversification.
+
 ### 3.1 The Context Asymmetry Spectrum
 
 Prior work treats context as binary: full context vs. no context. We propose a two-dimensional spectrum defined by **context depth** and **context delivery mode**.
