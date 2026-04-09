@@ -80,7 +80,7 @@ How context reaches a model — via prompt, system prompt, persistent memory, or
 
 ### 2.8 Distinction from Multi-Agent Task Division
 
-Claude Agent Teams and similar systems (CrewAI, MetaGPT) implement cooperative division — splitting work across agents for throughput. Adding more agents increases throughput (more hands) but does not address anchoring bias, because all agents share the same context and thus the same stochastic priors. Under Choi et al.'s martingale result [7], scaling homogeneous agents is mathematically equivalent to majority voting over identically biased samples. Ploidy implements the orthogonal strategy: cooperative verification, where the same problem is analyzed from intentionally different information states. The goal is not more output but different perspectives — disagreements are the primary signal, not a failure mode.
+Claude Managed Agents and similar systems (CrewAI, MetaGPT) implement cooperative division — splitting work across agents for throughput. Adding more agents increases throughput (more hands) but does not address anchoring bias, because all agents share the same context and thus the same stochastic priors. Under Choi et al.'s martingale result [7], scaling homogeneous agents is mathematically equivalent to majority voting over identically biased samples. Ploidy implements the orthogonal strategy: cooperative verification, where the same problem is analyzed from intentionally different information states. The goal is not more output but different perspectives — disagreements are the primary signal, not a failure mode.
 
 ---
 

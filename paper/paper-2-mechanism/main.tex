@@ -130,7 +130,7 @@ AceMAD provides the theoretical foundation demonstrating \emph{that} asymmetry w
 \subsection{Scaling Agents vs.\ Scaling Diversity}
 \label{sec:scaling}
 
-Large-scale agent simulations (e.g., AgentSociety~\citep{pang2025agentsociety} with 10K agents, MiroFish with 700K agents) pursue verification breadth---more agents analyzing the same problem. Boca et al.~\citep{boca2025emergent} showed that even without individual-level bias, LLM populations spontaneously develop collective biases through interaction. Combined with Choi et al.'s martingale result~\citep{choi2025debate}, this suggests that scaling homogeneous agent count does not reliably improve decision quality. Ploidy pursues the orthogonal dimension: verification depth through context diversity.
+Large-scale agent simulations (e.g., AgentSociety~\citep{pang2025agentsociety} with 10K agents, MiroFish with 700K agents) pursue verification breadth---more agents analyzing the same problem. Boca et al.~\citep{boca2025emergent} showed that even without individual-level bias, LLM populations spontaneously develop collective biases through interaction. Combined with Choi et al.'s martingale result~\citep{choi2025debate}, this suggests that scaling homogeneous agent count does not reliably improve decision quality. Anthropic's own evaluation corroborates: spawning subagents on BrowseComp yielded only +2.8\% over single-agent runs, whereas context management techniques (compaction) produced far larger gains~\citep{anthropic2026harnessing}---improving throughput, not verification depth. Ploidy pursues the orthogonal dimension: verification depth through context diversity.
 
 \subsection{Sycophancy and Persistent Context Bias}
 \label{sec:sycophancy}
@@ -186,7 +186,7 @@ AgentSociety~\citep{pang2025agentsociety} & Population simulation & Homogeneous 
 \subsection{Distinction from Multi-Agent Task Division}
 \label{sec:distinction}
 
-Claude Agent Teams and similar systems (CrewAI, MetaGPT) implement cooperative division---splitting work across agents for throughput. Adding more agents increases throughput (more hands) but does not address anchoring bias, because all agents share the same context and thus the same stochastic priors. Under Choi et al.'s martingale result~\citep{choi2025debate}, scaling homogeneous agents is mathematically equivalent to majority voting over identically biased samples. Ploidy implements the orthogonal strategy: cooperative verification, where the same problem is analyzed from intentionally different information states. The goal is not more output but different perspectives---disagreements are the primary signal, not a failure mode.
+Claude Managed Agents~\citep{anthropic2026managedagents} and similar systems (CrewAI, MetaGPT) implement cooperative division---splitting work across agents for throughput. Adding more agents increases throughput (more hands) but does not address anchoring bias, because all agents share the same context and thus the same stochastic priors. Under Choi et al.'s martingale result~\citep{choi2025debate}, scaling homogeneous agents is mathematically equivalent to majority voting over identically biased samples. Ploidy implements the orthogonal strategy: cooperative verification, where the same problem is analyzed from intentionally different information states. The goal is not more output but different perspectives---disagreements are the primary signal, not a failure mode.
 
 % ============================================================
 \section{The Ploidy Protocol}
