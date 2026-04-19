@@ -46,6 +46,9 @@ analysis = [
 metrics = [
     "prometheus-client>=0.20",
 ]
+redis = [
+    "redis>=5.0",
+]
 dev = [
     "pytest",
     "pytest-asyncio",
@@ -53,13 +56,14 @@ dev = [
     "httpx",
     "ruff",
     "prometheus-client>=0.20",
+    "fakeredis>=2.20",
 ]
 docs = [
     "mkdocs-material",
     "mkdocs-minify-plugin",
 ]
 all = [
-    "ploidy[api,dashboard,dev,docs,analysis,metrics]",
+    "ploidy[api,dashboard,dev,docs,analysis,metrics,redis]",
 ]
 
 [tool.ruff]

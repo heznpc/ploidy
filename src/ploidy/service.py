@@ -29,6 +29,7 @@ from ploidy.injection import (
     append_language,
     build_deep_prompt,
 )
+from ploidy.lockprovider import AsyncLockProvider, LockProvider
 from ploidy.metrics import metrics, tenant_label
 from ploidy.protocol import DebateMessage, DebatePhase, DebateProtocol, SemanticAction
 from ploidy.ratelimit import RateLimitError, TokenBucketLimiter
@@ -92,6 +93,7 @@ class DebateService:
         max_context_docs: int = 10,
         max_sessions_per_debate: int = 5,
         rate_limiter: TokenBucketLimiter | None = None,
+        lock_provider: LockProvider | None = None,
         retention_days: int = 0,
         retention_interval_seconds: int = 3600,
         retention_vacuum: bool = True,
@@ -108,6 +110,7 @@ class DebateService:
         # When no limiter is supplied, fall back to a disabled one so callers
         # can always `await self.rate_limiter.acquire(...)` without branching.
         self.rate_limiter = rate_limiter or TokenBucketLimiter(capacity=0, rate_per_sec=0)
+        self.lock_provider: LockProvider = lock_provider or AsyncLockProvider()
         self._retention_task: asyncio.Task[None] | None = None
 
         self.protocols: dict[str, DebateProtocol] = {}
@@ -146,6 +149,10 @@ class DebateService:
             self._retention_task = None
         if self.store is not None:
             await self.store.close()
+        try:
+            await self.lock_provider.close()
+        except Exception:
+            logger.exception("LockProvider close failed")
         self.protocols.clear()
         self.sessions.clear()
         self.debate_sessions.clear()
@@ -200,9 +207,18 @@ class DebateService:
             raise SessionError(f"No debate found for session {session_id}")
         return debate_id
 
-    def _get_lock(self, debate_id: str) -> asyncio.Lock:
-        """dict.setdefault is atomic in CPython, avoiding a TOCTOU race."""
-        return self.debate_locks.setdefault(debate_id, asyncio.Lock())
+    def _get_lock(self, debate_id: str):
+        """Return an async context manager guarding this debate.
+
+        Delegates to the configured :class:`LockProvider`; local instances
+        still key ``asyncio.Lock`` objects atomically via ``dict.setdefault``
+        and distributed instances spin a Redis SET NX lock.
+        """
+        # debate_locks remains as a per-service tracker so
+        # cleanup assertions keep working; the actual lock lives in the
+        # provider.
+        self.debate_locks[debate_id] = True
+        return self.lock_provider.lock(debate_id)
 
     def _validate_length(self, text: str, max_len: int, field: str) -> None:
         if len(text) > max_len:
@@ -336,7 +352,6 @@ class DebateService:
 
             self.protocols[debate_id] = protocol
             self.debate_sessions[debate_id] = session_ids
-            self.debate_locks[debate_id] = asyncio.Lock()
             self.debate_owners[debate_id] = debate.get("owner_id")
             recovered += 1
 
@@ -391,7 +406,6 @@ class DebateService:
 
             self.protocols[debate_id] = protocol
             self.debate_sessions[debate_id] = session_ids
-            self.debate_locks[debate_id] = asyncio.Lock()
             self.debate_owners[debate_id] = debate.get("owner_id")
             self.paused_debates[debate_id] = paused_ctx
             paused_recovered += 1
@@ -449,7 +463,6 @@ class DebateService:
 
         protocol = DebateProtocol(debate_id, prompt)
         self.protocols[debate_id] = protocol
-        self.debate_locks[debate_id] = asyncio.Lock()
         self.debate_owners[debate_id] = owner_id
 
         metrics().debate_started.labels(tenant=tenant_label(owner_id), mode="two_terminal").inc()
@@ -863,7 +876,6 @@ class DebateService:
 
                 protocol = DebateProtocol(debate_id, prompt)
                 self.protocols[debate_id] = protocol
-                self.debate_locks[debate_id] = asyncio.Lock()
                 self.debate_owners[debate_id] = owner_id
 
                 protocol.advance_phase()
@@ -1085,7 +1097,6 @@ class DebateService:
 
         protocol = DebateProtocol(debate_id, prompt)
         self.protocols[debate_id] = protocol
-        self.debate_locks[debate_id] = asyncio.Lock()
         self.debate_sessions[debate_id] = []
         self.debate_owners[debate_id] = owner_id
 

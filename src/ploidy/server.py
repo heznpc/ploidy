@@ -30,6 +30,7 @@ from mcp.server.auth.provider import AccessToken
 from mcp.server.fastmcp import FastMCP
 from mcp.types import ToolAnnotations
 
+from ploidy.lockprovider import AsyncLockProvider, LockProvider, RedisLockProvider
 from ploidy.logctx import install as install_logctx
 from ploidy.logctx import traced
 from ploidy.ratelimit import TokenBucketLimiter
@@ -84,6 +85,10 @@ _RATE_PER_SEC = float(os.environ.get("PLOIDY_RATE_PER_SEC", "0"))
 _RETENTION_DAYS = int(os.environ.get("PLOIDY_RETENTION_DAYS", "0"))
 _RETENTION_INTERVAL_SEC = int(os.environ.get("PLOIDY_RETENTION_INTERVAL_SEC", "3600"))
 _RETENTION_VACUUM = os.environ.get("PLOIDY_RETENTION_VACUUM", "1").lower() in ("1", "true", "yes")
+# Optional distributed lock backend for multi-replica deployments. When
+# unset, single-node asyncio.Lock continues to be used.
+_REDIS_URL = os.environ.get("PLOIDY_REDIS_URL")
+_REDIS_LOCK_TTL_MS = int(os.environ.get("PLOIDY_REDIS_LOCK_TTL_MS", "30000"))
 
 
 # ---------------------------------------------------------------------------
@@ -175,6 +180,22 @@ _service: DebateService | None = None
 _init_lock = asyncio.Lock()
 
 
+def _build_lock_provider() -> LockProvider:
+    if _REDIS_URL:
+        try:
+            from redis.asyncio import Redis
+        except ImportError:
+            logger.error(
+                "PLOIDY_REDIS_URL is set but the 'redis' package is missing; "
+                "falling back to single-node locks"
+            )
+            return AsyncLockProvider()
+        client = Redis.from_url(_REDIS_URL, decode_responses=True)
+        logger.info("RedisLockProvider enabled (url=%s, ttl_ms=%d)", _REDIS_URL, _REDIS_LOCK_TTL_MS)
+        return RedisLockProvider(client, ttl_ms=_REDIS_LOCK_TTL_MS)
+    return AsyncLockProvider()
+
+
 async def _init() -> DebateService:
     """Lazily construct and initialise the shared DebateService."""
     global _service
@@ -192,6 +213,7 @@ async def _init() -> DebateService:
                 rate_limiter=TokenBucketLimiter(
                     capacity=_RATE_CAPACITY, rate_per_sec=_RATE_PER_SEC
                 ),
+                lock_provider=_build_lock_provider(),
                 retention_days=_RETENTION_DAYS,
                 retention_interval_seconds=_RETENTION_INTERVAL_SEC,
                 retention_vacuum=_RETENTION_VACUUM,
