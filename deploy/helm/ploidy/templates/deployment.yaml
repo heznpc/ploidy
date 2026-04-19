@@ -1,0 +1,105 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "ploidy.fullname" . }}
+  labels: {{- include "ploidy.labels" . | nindent 4 }}
+spec:
+  # Singleton: SQLite backend does not support concurrent writers from
+  # multiple pods. Swap the state backend before scaling past 1.
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels: {{- include "ploidy.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels: {{- include "ploidy.selectorLabels" . | nindent 8 }}
+      annotations:
+        # Roll the pod when the secret changes so new tokens take effect
+        # without needing a manual `kubectl rollout restart`.
+        {{- if or .Values.secrets .Values.existingSecret }}
+        checksum/secret: {{ printf "%v" .Values.secrets | sha256sum }}
+        {{- end }}
+    spec:
+      serviceAccountName: {{ include "ploidy.serviceAccountName" . }}
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext: {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      containers:
+        - name: ploidy
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          securityContext: {{- toYaml .Values.securityContext | nindent 12 }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.container.port }}
+              protocol: TCP
+          env:
+            {{- range $k, $v := .Values.env }}
+            - name: {{ $k }}
+              value: {{ $v | quote }}
+            {{- end }}
+            {{- if or .Values.secrets .Values.existingSecret }}
+            {{- $secretName := include "ploidy.secretName" . }}
+            {{- $keys := list }}
+            {{- if .Values.secrets }}
+              {{- range $k, $_ := .Values.secrets }}{{- $keys = append $keys $k }}{{- end }}
+            {{- end }}
+            {{- if and .Values.existingSecret (not .Values.secrets) }}
+              {{- /* existingSecret assumed to hold PLOIDY_AUTH_TOKEN / PLOIDY_TOKENS */ -}}
+              {{- $keys = list "PLOIDY_AUTH_TOKEN" "PLOIDY_TOKENS" "PLOIDY_API_KEY" "PLOIDY_DASH_TOKEN" }}
+            {{- end }}
+            {{- range $k := $keys }}
+            - name: {{ $k }}
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $secretName }}
+                  key: {{ $k }}
+                  optional: true
+            {{- end }}
+            {{- end }}
+          livenessProbe:
+            httpGet:
+              path: {{ .Values.probes.liveness.path }}
+              port: http
+            initialDelaySeconds: {{ .Values.probes.liveness.initialDelaySeconds }}
+            periodSeconds: {{ .Values.probes.liveness.periodSeconds }}
+            timeoutSeconds: {{ .Values.probes.liveness.timeoutSeconds }}
+            failureThreshold: {{ .Values.probes.liveness.failureThreshold }}
+          readinessProbe:
+            httpGet:
+              path: {{ .Values.probes.readiness.path }}
+              port: http
+            initialDelaySeconds: {{ .Values.probes.readiness.initialDelaySeconds }}
+            periodSeconds: {{ .Values.probes.readiness.periodSeconds }}
+            timeoutSeconds: {{ .Values.probes.readiness.timeoutSeconds }}
+            failureThreshold: {{ .Values.probes.readiness.failureThreshold }}
+          resources: {{- toYaml .Values.container.resources | nindent 12 }}
+          volumeMounts:
+            {{- if .Values.persistence.enabled }}
+            - name: data
+              mountPath: {{ .Values.persistence.mountPath }}
+            {{- end }}
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        {{- if .Values.persistence.enabled }}
+        - name: data
+          persistentVolumeClaim:
+            claimName: {{ include "ploidy.fullname" . }}
+        {{- else }}
+        - name: data
+          emptyDir: {}
+        {{- end }}
+        - name: tmp
+          emptyDir: {}
+      {{- with .Values.nodeSelector }}
+      nodeSelector: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity: {{- toYaml . | nindent 8 }}
+      {{- end }}

@@ -1,0 +1,104 @@
+# Default values for ploidy.
+# Ploidy keeps state in a local SQLite file, so replicas is fixed at 1 and the
+# Deployment uses a Recreate strategy. Flipping to multi-replica requires
+# swapping the state backend (tracked as future work).
+
+image:
+  repository: ghcr.io/heznpc/ploidy
+  tag: latest
+  pullPolicy: IfNotPresent
+
+imagePullSecrets: []
+
+# Service
+service:
+  type: ClusterIP
+  port: 8765
+  annotations: {}
+
+# Container
+container:
+  port: 8765
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+
+# Persistence (SQLite DB lives here)
+persistence:
+  enabled: true
+  size: 2Gi
+  storageClass: ""  # "" picks the cluster default
+  accessMode: ReadWriteOnce
+  # Mount path inside the container — must match PLOIDY_DB_PATH below.
+  mountPath: /data
+
+# PLOIDY_* env — everything in `env` is passed through verbatim.
+env:
+  PLOIDY_TRANSPORT: streamable-http
+  PLOIDY_PORT: "8765"
+  PLOIDY_DB_PATH: /data/ploidy.db
+  PLOIDY_LOG_LEVEL: INFO
+  # Retention defaults off; set to >0 to enable a background purge.
+  # PLOIDY_RETENTION_DAYS: "30"
+  # Rate limit defaults off.
+  # PLOIDY_RATE_CAPACITY: "20"
+  # PLOIDY_RATE_PER_SEC: "1"
+
+# Secrets. Values land in a Secret; keys are mounted as env vars.
+# Populate at install time via `--set-string secrets.PLOIDY_AUTH_TOKEN=...`
+# or point `existingSecret` at a pre-created Secret holding the same keys.
+secrets: {}
+existingSecret: ""
+
+# RBAC / identity
+serviceAccount:
+  create: true
+  name: ""  # "" = generate from chart fullname
+  annotations: {}
+
+# Pod security
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 1000
+  fsGroup: 1000
+
+securityContext:
+  allowPrivilegeEscalation: false
+  capabilities:
+    drop: ["ALL"]
+  readOnlyRootFilesystem: true
+
+# Liveness / readiness use GET /healthz (added in P0 hardening).
+probes:
+  liveness:
+    path: /healthz
+    initialDelaySeconds: 10
+    periodSeconds: 30
+    timeoutSeconds: 5
+    failureThreshold: 3
+  readiness:
+    path: /healthz
+    initialDelaySeconds: 5
+    periodSeconds: 10
+    timeoutSeconds: 3
+    failureThreshold: 3
+
+# Prometheus scraping for GET /metrics.
+serviceMonitor:
+  enabled: false
+  interval: 30s
+  scrapeTimeout: 10s
+  labels: {}
+
+# NetworkPolicy to restrict ingress to the monitoring namespace + same ns.
+networkPolicy:
+  enabled: false
+  allowFromNamespaces: []
+
+nodeSelector: {}
+tolerations: []
+affinity: {}
