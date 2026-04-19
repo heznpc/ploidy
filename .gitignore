@@ -46,37 +46,43 @@ site/
 # Korean documentation (local only)
 docs/ko/
 
-# Claude Code config (local only)
+# Claude Code / agent local config
 CLAUDE.md
+.claude/
 
-# Internal research notes (local only)
+# Template convention: planning TODO is kept local per developer
+TODO.md
+
+# Internal notes (local only)
 docs/internal/
 docs/paper-draft.md
-paper/research-program.md
-paper/context-as-lifespan-outline.md
-paper/draft-v1.md
-paper/draft-v2.md
-diploid-paper-outline.md
 
-# Experiment scripts (local only)
-experiments/resume_all.sh
-experiments/skills_fresh_design.py
+# Experiment local-only scripts
+experiments/src/resume_all.sh
+experiments/src/skills_fresh_design.py
 experiments/EXPERIMENT_SPEC_UNIFIED.md
 
-# Experiment results (large, local only)
+# Experiment results and logs (large, regenerated locally)
 experiments/results/
 experiments/logs/
 experiments/phase*.log
 
-# LaTeX build artifacts
-paper/**/*.aux
-paper/**/*.bbl
-paper/**/*.blg
-paper/**/*.log
-paper/**/*.out
-paper/**/*.pdf
-paper/**/*.fls
-paper/**/*.fdb_latexmk
-paper/**/*.synctex.gz
-paper/**/missfont.log
-paper/shared/Template-2026/colm_template.tar.gz
+# LaTeX intermediate artifacts (everywhere)
+**/*.aux
+**/*.blg
+**/*.log
+**/*.out
+**/*.fls
+**/*.fdb_latexmk
+**/*.synctex.gz
+**/*.toc
+**/*.lof
+**/*.lot
+**/*.nav
+**/*.snm
+**/*.vrb
+**/missfont.log
+
+# Preprint working copies (regenerated); submission snapshots in submissions/ stay tracked
+paper/main.pdf
+paper/main.bbl

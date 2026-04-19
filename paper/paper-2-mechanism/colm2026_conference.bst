@@ -1,1 +1,0 @@
-../shared/Template-2026/colm2026_conference.bst
