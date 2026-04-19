@@ -2,8 +2,8 @@
 
 **Intentional context asymmetry to reduce confirmation bias in LLMs.**
 
-[![CI](https://github.com/heznpc/ploidy/actions/workflows/ci.yml/badge.svg)](https://github.com/heznpc/ploidy/actions/workflows/ci.yml)
-[![Docs](https://img.shields.io/badge/docs-heznpc.github.io%2FPLOIDY-blue)](https://heznpc.github.io/PLOIDY/)
+[![CI](https://github.com/heznpc/ploidy-research/actions/workflows/ci.yml/badge.svg)](https://github.com/heznpc/ploidy-research/actions/workflows/ci.yml)
+[![Docs](https://img.shields.io/badge/docs-heznpc.github.io%2Fploidy-research-blue)](https://heznpc.github.io/ploidy-research/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue)](https://python.org)
 
@@ -147,13 +147,17 @@ docker compose up
 
 ## Documentation
 
-- [Getting Started](https://heznpc.github.io/PLOIDY/getting-started/) — Install and first debate
-- [How It Works](https://heznpc.github.io/PLOIDY/how-it-works/) — Core concept
-- [Architecture](https://heznpc.github.io/PLOIDY/architecture/) — Technical overview
-- [API Reference](https://heznpc.github.io/PLOIDY/api-reference/) — Tool documentation
-- [Research](https://heznpc.github.io/PLOIDY/research/) — Academic positioning
+- [Getting Started](https://heznpc.github.io/ploidy-research/getting-started/) — Install and first debate
+- [How It Works](https://heznpc.github.io/ploidy-research/how-it-works/) — Core concept
+- [Architecture](https://heznpc.github.io/ploidy-research/architecture/) — Technical overview
+- [API Reference](https://heznpc.github.io/ploidy-research/api-reference/) — Tool documentation
+- [Research](https://heznpc.github.io/ploidy-research/research/) — Academic positioning
 
 ## Research
+
+This monorepo contains both the MCP server and the **mechanism paper** that the software accompanies. See `paper/main.tex` for the preprint and `planning/` for drafts, review notes, and the shared research program. The companion **theory paper** ("The Accumulation–Renewal Dilemma") lives in a sibling repository: [heznpc/lifespan](https://github.com/heznpc/lifespan).
+
+### Positioning
 
 Ploidy extends Cross-Context Review ([Song 2026](https://arxiv.org/abs/2603.12123)) from unidirectional fresh-session review to bidirectional structured debate. The intersection of context asymmetry × same-model debate × structured protocol has zero published papers as of March 2026.
 
