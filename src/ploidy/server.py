@@ -4,19 +4,16 @@ Thin tool layer over ``DebateService``. Tools validate MCP-specific
 concerns (annotations, docstrings surfaced to clients) and forward to
 the service. All state lives on the service instance.
 
-Tools exposed (12):
-- debate_start: Begin a new debate session with a decision prompt
-- debate_join: Join an existing debate as the fresh session
-- debate_position: Submit a position from a session
-- debate_challenge: Submit a challenge to another session's position
-- debate_converge: Trigger convergence analysis
-- debate_status: Get current state of a debate
-- debate_cancel: Cancel a debate in progress
-- debate_delete: Permanently delete a debate and all its data
-- debate_history: Retrieve past debates and their outcomes
-- debate_auto: Run a full two-sided debate automatically via API
-- debate_review: Review and resume a paused auto-debate (HITL)
-- debate_solo: Caller-supplied positions; converge in one call (no API key needed)
+Primary tool (v0.4):
+- debate(prompt, mode="auto"|"solo", ...): unified entry point.
+  Pick auto for API-generated debate or solo for caller-supplied
+  positions. Handles HITL via pause_at + debate_review.
+
+Legacy tools (deprecated, kept for two-terminal and HITL workflows):
+- debate_start / debate_join / debate_position / debate_challenge
+- debate_converge / debate_cancel / debate_delete
+- debate_status / debate_history
+- debate_auto / debate_solo / debate_review
 """
 
 import asyncio
@@ -240,8 +237,132 @@ async def shutdown() -> None:
     annotations=ToolAnnotations(destructiveHint=True, readOnlyHint=False, idempotentHint=False),
 )
 @traced
+async def debate(
+    prompt: str,
+    mode: str = "auto",
+    # solo-mode inputs
+    deep_position: str | None = None,
+    fresh_position: str | None = None,
+    deep_challenge: str | None = None,
+    fresh_challenge: str | None = None,
+    deep_label: str = "Deep",
+    fresh_label: str = "Fresh",
+    # auto-mode inputs
+    fresh_role: str = "fresh",
+    delivery_mode: str = "none",
+    pause_at: str | None = None,
+    deep_n: int = 1,
+    fresh_n: int = 1,
+    effort: str = "high",
+    injection_mode: str = "raw",
+    context_pct: int = 100,
+    language: str = "en",
+    deep_model: str | None = None,
+    fresh_model: str | None = None,
+    # shared
+    context_documents: list[str] | None = None,
+) -> dict:
+    """Run a context-asymmetric debate in a single call.
+
+    One canonical entry point. Pick a mode:
+
+    - ``auto`` (default): Ploidy generates both sides via the configured
+      OpenAI-compatible API endpoint and returns the convergence result.
+      Requires PLOIDY_API_BASE_URL. HITL pause/resume available via
+      ``pause_at``; resume with the legacy ``debate_review`` tool.
+    - ``solo``: you supply both positions (and optionally both challenges)
+      and Ploidy persists + converges them. No external API key needed —
+      the recommended single-terminal flow when the caller (e.g. Claude
+      Code itself) writes both sides locally.
+
+    The older 12-tool surface (``debate_start`` / ``debate_join`` /
+    ``debate_position`` / ...) remains available for two-terminal and
+    HITL workflows but is now deprecated; new integrations should use
+    this tool.
+
+    Args:
+        prompt: The decision question to debate.
+        mode: ``"auto"`` or ``"solo"``.
+        deep_position: (solo only) Deep side's stance.
+        fresh_position: (solo only) Fresh side's stance.
+        deep_challenge: (solo only) Optional deep-side critique.
+        fresh_challenge: (solo only) Optional fresh-side critique.
+        deep_label / fresh_label: (solo) display labels for roles.
+        fresh_role: (auto) ``"fresh"`` or ``"semi_fresh"``.
+        delivery_mode: (auto + semi_fresh) ``"passive"``, ``"active"``,
+            or ``"selective"``.
+        pause_at: (auto) Optional ``"challenge"`` or ``"convergence"``
+            HITL pause point.
+        deep_n / fresh_n: (auto) Ploidy level per side.
+        effort: (auto) ``"low"``, ``"medium"``, ``"high"``, ``"max"``.
+        injection_mode: (auto) Context formatting mode.
+        context_pct: (auto) Percentage of context to retain.
+        language: (auto) Output language code.
+        deep_model / fresh_model: (auto) Per-side model overrides.
+        context_documents: Optional documents attached to the deep side.
+
+    Returns:
+        Convergence result dict, or paused state (auto + pause_at).
+    """
+    svc = await _init()
+    owner = _current_owner()
+
+    if mode == "solo":
+        if not deep_position or not fresh_position:
+            raise ValueError("debate(mode='solo') requires both deep_position and fresh_position")
+        return await svc.run_solo(
+            prompt=prompt,
+            deep_position=deep_position,
+            fresh_position=fresh_position,
+            deep_challenge=deep_challenge,
+            fresh_challenge=fresh_challenge,
+            context_documents=context_documents,
+            deep_label=deep_label,
+            fresh_label=fresh_label,
+            tenant=owner or "global",
+            owner_id=owner,
+        )
+
+    if mode == "auto":
+        for name, value in (
+            ("deep_position", deep_position),
+            ("fresh_position", fresh_position),
+            ("deep_challenge", deep_challenge),
+            ("fresh_challenge", fresh_challenge),
+        ):
+            if value is not None:
+                raise ValueError(
+                    f"debate(mode='auto') does not accept {name}; pass these only when mode='solo'"
+                )
+        return await svc.run_auto(
+            prompt=prompt,
+            context_documents=context_documents,
+            fresh_role=fresh_role,
+            delivery_mode=delivery_mode,
+            pause_at=pause_at,
+            deep_n=deep_n,
+            fresh_n=fresh_n,
+            effort=effort,
+            injection_mode=injection_mode,
+            context_pct=context_pct,
+            language=language,
+            deep_model=deep_model,
+            fresh_model=fresh_model,
+            tenant=owner or "global",
+            owner_id=owner,
+        )
+
+    raise ValueError(f"Invalid mode '{mode}'. Must be 'auto' or 'solo'")
+
+
+@mcp.tool(
+    annotations=ToolAnnotations(destructiveHint=True, readOnlyHint=False, idempotentHint=False),
+)
+@traced
 async def debate_start(prompt: str, context_documents: list[str] | None = None) -> dict:
-    """Begin a new debate session with a decision prompt.
+    """DEPRECATED (v0.4) — prefer ``debate(prompt, mode=...)``.
+
+    Begin a new debate session with a decision prompt.
 
     Creates a debate and a Deep (full-context) session.
     Share the returned debate_id with the fresh session so it can join.
@@ -262,7 +383,9 @@ async def debate_join(
     role: str = "fresh",
     delivery_mode: str = "none",
 ) -> dict:
-    """Join an existing debate as a fresh or semi-fresh session."""
+    """DEPRECATED (v0.4) — prefer ``debate(prompt, mode=...)``.
+
+    Join an existing debate as a fresh or semi-fresh session."""
     svc = await _init()
     return await svc.join_debate(debate_id, role, delivery_mode, owner_id=_current_owner())
 
@@ -272,7 +395,9 @@ async def debate_join(
 )
 @traced
 async def debate_position(session_id: str, content: str) -> dict:
-    """Submit a position from a session."""
+    """DEPRECATED (v0.4) — prefer ``debate(prompt, mode=...)``.
+
+    Submit a position from a session."""
     svc = await _init()
     return await svc.submit_position(session_id, content, owner_id=_current_owner())
 
@@ -282,7 +407,9 @@ async def debate_position(session_id: str, content: str) -> dict:
 )
 @traced
 async def debate_challenge(session_id: str, content: str, action: str = "challenge") -> dict:
-    """Submit a challenge to another session's position."""
+    """DEPRECATED (v0.4) — prefer ``debate(prompt, mode=...)``.
+
+    Submit a challenge to another session's position."""
     svc = await _init()
     return await svc.submit_challenge(session_id, content, action, owner_id=_current_owner())
 
@@ -297,7 +424,9 @@ async def debate_challenge(session_id: str, content: str, action: str = "challen
 )
 @traced
 async def debate_converge(debate_id: str) -> dict:
-    """Trigger convergence analysis for a debate."""
+    """DEPRECATED (v0.4) — prefer ``debate(prompt, mode=...)``.
+
+    Trigger convergence analysis for a debate."""
     svc = await _init()
     return await svc.converge(debate_id, owner_id=_current_owner())
 
@@ -307,7 +436,9 @@ async def debate_converge(debate_id: str) -> dict:
 )
 @traced
 async def debate_cancel(debate_id: str) -> dict:
-    """Cancel a debate in progress."""
+    """DEPRECATED (v0.4) — prefer ``debate(prompt, mode=...)``.
+
+    Cancel a debate in progress."""
     svc = await _init()
     return await svc.cancel(debate_id, owner_id=_current_owner())
 
@@ -317,7 +448,9 @@ async def debate_cancel(debate_id: str) -> dict:
 )
 @traced
 async def debate_delete(debate_id: str) -> dict:
-    """Permanently delete a debate and all its data."""
+    """DEPRECATED (v0.4) — prefer ``debate(prompt, mode=...)``.
+
+    Permanently delete a debate and all its data."""
     svc = await _init()
     return await svc.delete(debate_id, owner_id=_current_owner())
 
@@ -327,7 +460,9 @@ async def debate_delete(debate_id: str) -> dict:
 )
 @traced
 async def debate_status(debate_id: str) -> dict:
-    """Get current state of a debate."""
+    """DEPRECATED (v0.4) — prefer ``debate(prompt, mode=...)``.
+
+    Get current state of a debate."""
     svc = await _init()
     return await svc.status(debate_id, owner_id=_current_owner())
 
@@ -337,7 +472,9 @@ async def debate_status(debate_id: str) -> dict:
 )
 @traced
 async def debate_history(limit: int = 50) -> dict:
-    """Retrieve past debates and their outcomes."""
+    """DEPRECATED (v0.4) — prefer ``debate(prompt, mode=...)``.
+
+    Retrieve past debates and their outcomes."""
     svc = await _init()
     return await svc.history(limit, owner_id=_current_owner())
 
@@ -356,7 +493,9 @@ async def debate_solo(
     deep_label: str = "Deep",
     fresh_label: str = "Fresh",
 ) -> dict:
-    """Run a complete debate from caller-supplied positions in one call.
+    """DEPRECATED (v0.4) — prefer ``debate(prompt, mode=...)``.
+
+    Run a complete debate from caller-supplied positions in one call.
 
     Single-terminal entry point: the caller generates both sides locally
     and submits the texts here. No external API key required.
@@ -396,7 +535,9 @@ async def debate_auto(
     deep_model: str | None = None,
     fresh_model: str | None = None,
 ) -> dict:
-    """Run a complete debate automatically in a single command.
+    """DEPRECATED (v0.4) — prefer ``debate(prompt, mode=...)``.
+
+    Run a complete debate automatically in a single command.
 
     Requires PLOIDY_API_BASE_URL to be configured. Generates positions
     and challenges via an OpenAI-compatible endpoint, runs the protocol,
@@ -432,7 +573,9 @@ async def debate_review(
     action: str = "approve",
     override_content: str | None = None,
 ) -> dict:
-    """Review and resume a paused auto-debate (HITL).
+    """DEPRECATED (v0.4) — prefer ``debate(prompt, mode=...)``.
+
+    Review and resume a paused auto-debate (HITL).
 
     Call after ``debate_auto`` with ``pause_at`` paused the run. Action
     is one of 'approve', 'override', or 'reject'.
