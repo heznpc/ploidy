@@ -49,6 +49,11 @@ docs/ko/
 # Claude Code / agent local config
 CLAUDE.md
 .claude/
+# …but ship repo-level slash commands so every contributor
+# gets `/ploidy` without manual setup.
+!.claude/
+!.claude/commands/
+!.claude/commands/*.md
 
 # Template convention: planning TODO is kept local per developer
 TODO.md

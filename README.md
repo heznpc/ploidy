@@ -42,13 +42,25 @@ demand and there is no separate process to manage:
 }
 ```
 
-### Single-terminal flow (no API key)
+### Recommended: `/ploidy` slash command (Claude Code)
+
+```
+/ploidy Should we rewrite the ingestion pipeline in Rust?
+```
+
+The command ([`.claude/commands/ploidy.md`](.claude/commands/ploidy.md))
+writes your deep-context analysis, spawns a fresh sub-agent for the
+zero-context side, calls the MCP tool with both texts, and renders the
+synthesis. No API key needed.
+
+### Single-terminal flow (direct tool call)
 
 Inside one MCP client session, ask the assistant to write two analyses
 — one with full project context, one from a fresh sub-agent that only
-sees the prompt — then call `debate_solo` with both texts. Ploidy
-persists the debate, classifies the challenges, and returns the
-convergence in a single tool call.
+sees the prompt — then call `debate(mode="solo", ...)` with both texts.
+Ploidy persists the debate, classifies the challenges, and returns the
+convergence in a single tool call. See
+[`docs/v0.4-migration.md`](docs/v0.4-migration.md) for the full API.
 
 ### Two-terminal flow (cross-session, multi-client)
 

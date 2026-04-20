@@ -26,3 +26,18 @@ experiments/
 ```bash
 python src/<script>.py
 ```
+
+## Service vs research surface
+
+This directory drives the research protocol — the 12-tool phase state
+machine (`debate_start` / `debate_join` / `debate_position` / ...) in
+[`src/ploidy/server.py`](../src/ploidy/server.py). That surface is
+preserved specifically for these experiments; do not migrate calls
+here to the unified `debate(...)` tool.
+
+Service users have a different entry point: `debate(prompt, mode=...)`
+plus the `/ploidy` Claude Code slash command at
+[`.claude/commands/ploidy.md`](../.claude/commands/ploidy.md). See
+[`docs/v0.4-migration.md`](../docs/v0.4-migration.md) for the full
+mapping and the deprecation policy. Research protocols stay on the
+legacy tools indefinitely.

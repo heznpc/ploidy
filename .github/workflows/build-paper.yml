@@ -25,23 +25,16 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Build colm_submission.pdf
-        uses: xu-cheng/latex-action@v3
-        with:
-          root_file: colm_submission.tex
-          working_directory: paper/paper-2-mechanism
-
-      - name: Build main.pdf
+      - name: Build paper/main.pdf (canonical)
         uses: xu-cheng/latex-action@v3
         with:
           root_file: main.tex
-          working_directory: paper/paper-2-mechanism
+          working_directory: paper
 
       - name: Upload PDFs
         uses: actions/upload-artifact@v4
         with:
           name: paper-pdfs
           path: |
-            paper/paper-2-mechanism/colm_submission.pdf
-            paper/paper-2-mechanism/main.pdf
+            paper/main.pdf
           retention-days: 30
