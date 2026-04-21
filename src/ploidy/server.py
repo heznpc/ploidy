@@ -45,6 +45,11 @@ _MAX_PROMPT_LEN = int(os.environ.get("PLOIDY_MAX_PROMPT_LEN", "10000"))
 _MAX_CONTENT_LEN = int(os.environ.get("PLOIDY_MAX_CONTENT_LEN", "50000"))
 _MAX_CONTEXT_DOCS = int(os.environ.get("PLOIDY_MAX_CONTEXT_DOCS", "10"))
 _MAX_SESSIONS_PER_DEBATE = int(os.environ.get("PLOIDY_MAX_SESSIONS", "5"))
+# Combined context_documents token ceiling (approx ~4 chars/token).
+# 0 disables the cap for research behaviour; production deployments
+# should set this to something sane (e.g. 20000) to avoid runaway
+# input-token spend.
+_MAX_CONTEXT_TOKENS = int(os.environ.get("PLOIDY_MAX_CONTEXT_TOKENS", "0"))
 _AUTH_TOKEN = os.environ.get("PLOIDY_AUTH_TOKEN")
 # Multi-tenant: a JSON map {token: tenant_id}. When set, overrides
 # PLOIDY_AUTH_TOKEN. Each accepted token resolves to a distinct
@@ -308,6 +313,7 @@ async def _init() -> DebateService:
                 max_content_len=_MAX_CONTENT_LEN,
                 max_context_docs=_MAX_CONTEXT_DOCS,
                 max_sessions_per_debate=_MAX_SESSIONS_PER_DEBATE,
+                max_context_tokens=_MAX_CONTEXT_TOKENS or None,
                 rate_limiter=TokenBucketLimiter(
                     capacity=_RATE_CAPACITY, rate_per_sec=_RATE_PER_SEC
                 ),

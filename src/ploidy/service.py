@@ -98,6 +98,7 @@ class DebateService:
         max_content_len: int = 50000,
         max_context_docs: int = 10,
         max_sessions_per_debate: int = 5,
+        max_context_tokens: int | None = None,
         rate_limiter: TokenBucketLimiter | None = None,
         lock_provider: LockProvider | None = None,
         retention_days: int = 0,
@@ -110,6 +111,10 @@ class DebateService:
         self.max_content_len = max_content_len
         self.max_context_docs = max_context_docs
         self.max_sessions_per_debate = max_sessions_per_debate
+        # Hard ceiling on the combined ``context_documents`` length so a
+        # single huge-context debate cannot silently burn $50 of input
+        # tokens. None means no cap (research behaviour).
+        self.max_context_tokens = max_context_tokens
         self.retention_days = retention_days
         self.retention_interval_seconds = retention_interval_seconds
         self.retention_vacuum = retention_vacuum
@@ -223,6 +228,23 @@ class DebateService:
     def _validate_length(self, text: str, max_len: int, field: str) -> None:
         if len(text) > max_len:
             raise ProtocolError(f"{field} exceeds maximum length ({len(text)} > {max_len})")
+
+    def _enforce_context_budget(self, docs: list[str]) -> None:
+        """Reject context_documents larger than the configured token ceiling.
+
+        Uses a conservative 4-char-per-token approximation — good enough
+        for a cost guardrail, avoids pulling in a tiktoken dependency on
+        the hot path.
+        """
+        if self.max_context_tokens is None or not docs:
+            return
+        approx_tokens = sum(len(d) for d in docs) // 4
+        if approx_tokens > self.max_context_tokens:
+            raise ProtocolError(
+                f"context_documents total ~{approx_tokens} tokens exceeds "
+                f"configured ceiling of {self.max_context_tokens}. "
+                "Trim the documents or raise PLOIDY_MAX_CONTEXT_TOKENS."
+            )
 
     def _cleanup_debate(self, debate_id: str) -> None:
         self.protocols.pop(debate_id, None)
@@ -491,6 +513,7 @@ class DebateService:
             )
         for i, doc in enumerate(docs):
             self._validate_length(doc, self.max_content_len, f"context_documents[{i}]")
+        self._enforce_context_budget(docs)
 
         debate_id = uuid.uuid4().hex[:12]
         await self.store.save_debate(debate_id, prompt, owner_id=owner_id)
@@ -916,6 +939,7 @@ class DebateService:
             )
         for i, doc in enumerate(docs):
             self._validate_length(doc, self.max_content_len, f"context_documents[{i}]")
+        self._enforce_context_budget(docs)
 
         debate_id = uuid.uuid4().hex[:12]
         config = {"mode": "solo", "deep_label": deep_label, "fresh_label": fresh_label}
@@ -1125,6 +1149,7 @@ class DebateService:
             )
         for i, doc in enumerate(docs):
             self._validate_length(doc, self.max_content_len, f"context_documents[{i}]")
+        self._enforce_context_budget(docs)
 
         role_map = {"fresh": SessionRole.FRESH, "semi_fresh": SessionRole.SEMI_FRESH}
         auto_role = role_map.get(fresh_role)

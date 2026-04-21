@@ -38,6 +38,18 @@ _CLIENT_TIMEOUT = 120.0  # seconds for client-level HTTP timeout
 _API_BASE_URL = os.environ.get("PLOIDY_API_BASE_URL")
 _API_KEY = os.environ.get("PLOIDY_API_KEY", "")
 _API_MODEL = os.environ.get("PLOIDY_API_MODEL", "claude-opus-4-6")
+# Opt-in prompt caching. Anthropic's OpenAI-compat endpoint honours
+# cache_control breakpoints when passed via structured content blocks;
+# leaving this off preserves single-block behaviour for providers that
+# would reject the shape.
+_CACHE_ENABLED = os.environ.get("PLOIDY_API_CACHE", "").lower() in ("1", "true", "yes")
+
+
+def _provider_supports_cache_control() -> bool:
+    """Heuristic: Anthropic's endpoint understands cache_control blocks."""
+    if not _CACHE_ENABLED or not _API_BASE_URL:
+        return False
+    return "anthropic.com" in _API_BASE_URL.lower()
 
 
 def is_api_available() -> bool:
@@ -68,12 +80,41 @@ async def _get_client():
     return _cached_client
 
 
+def _build_user_content(
+    prompt: str | None,
+    cacheable_prefix: str | None,
+) -> str | list[dict]:
+    """Return user content in string form by default; structured blocks
+    when cache_control pass-through is enabled and a prefix is supplied.
+
+    The structured form splits the user message into (prefix, tail) with
+    a cache breakpoint on the prefix, which matches the Anthropic
+    OpenAI-compat contract for ephemeral caching.
+    """
+    if cacheable_prefix and _provider_supports_cache_control():
+        return [
+            {
+                "type": "text",
+                "text": cacheable_prefix,
+                "cache_control": {"type": "ephemeral"},
+            },
+            *([{"type": "text", "text": prompt}] if prompt else []),
+        ]
+    # Fall back to a plain string — providers doing automatic prefix
+    # caching (OpenAI, DeepSeek, etc.) still benefit because the shared
+    # ``cacheable_prefix`` stays byte-identical across sibling calls.
+    if cacheable_prefix and prompt:
+        return cacheable_prefix + prompt
+    return cacheable_prefix or prompt or ""
+
+
 async def generate_response(
     prompt: str,
     system_prompt: str | None = None,
     model: str | None = None,
     effort: str = "high",
     max_tokens: int = 4096,
+    cacheable_prefix: str | None = None,
 ) -> str:
     """Generate a response from the configured API endpoint.
 
@@ -95,7 +136,7 @@ async def generate_response(
     messages = []
     if system_prompt:
         messages.append({"role": "system", "content": system_prompt})
-    messages.append({"role": "user", "content": prompt})
+    messages.append({"role": "user", "content": _build_user_content(prompt, cacheable_prefix)})
 
     # Map effort level to max_tokens budget
     effort_tokens = {"low": 1024, "medium": 2048, "high": 4096, "max": 8192}
@@ -264,6 +305,23 @@ async def generate_semi_fresh_position(
     )
 
 
+def _build_challenge_shared_prefix(deep_position: str, fresh_position: str) -> str:
+    """Byte-stable position block reused across both challenge calls.
+
+    Both the deep→fresh and fresh→deep challenge calls see this exact
+    text as the prefix of the user message. Keeping the ordering and
+    wording fixed lets the provider's prefix cache deduplicate the
+    ~2000-token block instead of billing for it twice per debate.
+    """
+    return (
+        "Two sessions reviewed the same question with different context depths.\n\n"
+        "**Deep session** (full project context):\n\n"
+        f"{deep_position}\n\n"
+        "**Fresh session** (zero background):\n\n"
+        f"{fresh_position}\n\n"
+    )
+
+
 async def generate_challenge(
     own_position: str,
     other_position: str,
@@ -273,6 +331,12 @@ async def generate_challenge(
     model: str | None = None,
 ) -> str:
     """Generate a challenge response via API.
+
+    Challenges come in pairs (deep vs fresh, fresh vs deep). We structure
+    the user prompt as a cacheable position block followed by a tiny
+    role-specific tail; providers that support prompt caching
+    deduplicate the shared block, and those that don't still see a
+    byte-stable prefix that many auto-caching providers catch anyway.
 
     Args:
         own_position: This session's position.
@@ -290,17 +354,28 @@ async def generate_challenge(
     else:
         bias_frame = "wrong/misleading given project context"
 
-    prompt = (
-        f"You previously reviewed this code/system as a {own_role} session and found:\n\n"
-        f"{own_position}\n\n"
-        f"Now, a {other_role} session found these issues:\n\n{other_position}\n\n"
-        f"For EACH of their points, respond with:\n"
+    # Normalise the position pair into a fixed (deep, fresh) order so the
+    # prefix is identical no matter which side's challenge is running.
+    if own_role == "deep":
+        deep_position, fresh_position = own_position, other_position
+    else:
+        deep_position, fresh_position = other_position, own_position
+
+    cacheable_prefix = _build_challenge_shared_prefix(deep_position, fresh_position)
+    tail = (
+        f"---\n\nYour role: **{own_role}** session.\n\n"
+        f"For EACH point in the opposing ({other_role}) session's position, respond:\n"
         f"- AGREE: valid finding\n"
         f"- CHALLENGE: {bias_frame}, explain why\n"
         f"- SYNTHESIZE: partially right, here's the nuance\n\n"
-        f"Also list anything YOU found that THEY missed."
+        f"Also list anything you found that they missed."
     )
-    return await generate_response(prompt=prompt, effort=effort, model=model)
+    return await generate_response(
+        prompt=tail,
+        cacheable_prefix=cacheable_prefix,
+        effort=effort,
+        model=model,
+    )
 
 
 async def compress_position(position: str, model: str | None = None) -> str:
