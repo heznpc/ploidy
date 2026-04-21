@@ -36,6 +36,7 @@ from ploidy.ratelimit import RateLimitError, TokenBucketLimiter
 from ploidy.render import render_debate
 from ploidy.session import DeliveryMode, EffortLevel, SessionContext, SessionRole
 from ploidy.store import DebateStore
+from ploidy.stream import ProgressCallback, emit
 
 logger = logging.getLogger("ploidy.service")
 
@@ -1095,6 +1096,7 @@ class DebateService:
         *,
         tenant: str | None = None,
         owner_id: str | None = None,
+        progress: ProgressCallback | None = None,
     ) -> dict[str, Any]:
         tenant = self._resolve_tenant(tenant, owner_id)
         await self._acquire_or_count(tenant, cost=float(deep_n + fresh_n))
@@ -1244,6 +1246,14 @@ class DebateService:
 
         try:
             protocol.advance_phase()  # → POSITION
+            await emit(
+                progress,
+                "phase_started",
+                phase="position",
+                debate_id=debate_id,
+                deep_n=deep_n,
+                fresh_n=fresh_n,
+            )
 
             deep_tasks = [
                 generate_experienced_position(
@@ -1257,6 +1267,13 @@ class DebateService:
                 for _ in range(deep_n)
             ]
             deep_positions = await asyncio.gather(*deep_tasks)
+            await emit(
+                progress,
+                "positions_generated",
+                side="deep",
+                count=len(deep_positions),
+                previews=[p[:300] for p in deep_positions],
+            )
 
             compressed = None
             if auto_role == SessionRole.SEMI_FRESH:
@@ -1288,6 +1305,13 @@ class DebateService:
                         generate_fresh_position(fresh_prompt, effort=effort, model=fresh_model)
                     )
             fresh_positions = await asyncio.gather(*fresh_tasks)
+            await emit(
+                progress,
+                "positions_generated",
+                side="fresh",
+                count=len(fresh_positions),
+                previews=[p[:300] for p in fresh_positions],
+            )
 
             # Batch every position insert into one SQLite commit instead of
             # 2N fsyncs. aiosqlite serialises writes on its single
@@ -1344,6 +1368,7 @@ class DebateService:
                 }
 
             protocol.advance_phase()  # → CHALLENGE
+            await emit(progress, "phase_started", phase="challenge", debate_id=debate_id)
 
             deep_aggregate = _aggregate_positions(deep_positions, "Deep")
             fresh_aggregate = _aggregate_positions(
@@ -1372,6 +1397,14 @@ class DebateService:
 
             deep_action = _parse_dominant_action(deep_challenge)
             fresh_action = _parse_dominant_action(fresh_challenge)
+            await emit(
+                progress,
+                "challenges_generated",
+                deep_action=deep_action.value,
+                fresh_action=fresh_action.value,
+                deep_preview=deep_challenge[:300],
+                fresh_preview=fresh_challenge[:300],
+            )
 
             async with self.store.transaction():
                 for ctx in deep_sessions:
@@ -1441,6 +1474,7 @@ class DebateService:
                 }
 
             protocol.advance_phase()  # → CONVERGENCE
+            await emit(progress, "phase_started", phase="convergence", debate_id=debate_id)
 
             engine = ConvergenceEngine(use_llm=self.use_llm_convergence)
             session_roles: dict[str, str] = {}
@@ -1478,6 +1512,13 @@ class DebateService:
             raise
 
         metrics().debate_completed.labels(tenant=tenant_label(owner_id), mode="auto").inc()
+        await emit(
+            progress,
+            "completed",
+            debate_id=debate_id,
+            confidence=result.confidence,
+            points=len(result.points),
+        )
         logger.info(
             "Auto-debate %s complete (confidence=%.2f, ploidy=%dn)",
             debate_id,

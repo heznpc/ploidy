@@ -169,6 +169,107 @@ async def _metrics_endpoint(_request):
     return Response(body, media_type=content_type())
 
 
+@mcp.custom_route("/v1/debate/stream", methods=["POST"])
+async def _stream_debate(request):
+    """Server-Sent Events stream for ``debate(mode='auto')``.
+
+    The MCP tool call returns once the whole debate has converged, which
+    hides 20-60 seconds of intermediate phases. This endpoint runs the
+    same service path but emits ``phase_started`` / ``positions_generated``
+    / ``challenges_generated`` / ``completed`` frames as they happen, so
+    web / Discord clients can render a live progress UI.
+
+    Auth mirrors the MCP tool surface: a ``Bearer`` header with a
+    configured tenant token. Unauthenticated requests land as the
+    unscoped owner when no token map is configured — matching every
+    other tool.
+    """
+    import asyncio as _asyncio
+
+    from starlette.responses import StreamingResponse
+
+    from ploidy.stream import ProgressEvent, sse_format
+
+    body = await request.json()
+    if not isinstance(body, dict):
+        from starlette.responses import JSONResponse
+
+        return JSONResponse({"error": "body must be a JSON object"}, status_code=400)
+
+    svc = await _init()
+    owner = _resolve_stream_owner(request)
+
+    queue: _asyncio.Queue[ProgressEvent | None] = _asyncio.Queue()
+
+    async def on_progress(event: ProgressEvent) -> None:
+        await queue.put(event)
+
+    async def run() -> None:
+        try:
+            result = await svc.run_auto(
+                prompt=body.get("prompt", ""),
+                context_documents=body.get("context_documents"),
+                fresh_role=body.get("fresh_role", "fresh"),
+                delivery_mode=body.get("delivery_mode", "none"),
+                pause_at=body.get("pause_at"),
+                deep_n=int(body.get("deep_n", 1)),
+                fresh_n=int(body.get("fresh_n", 1)),
+                effort=body.get("effort", "high"),
+                injection_mode=body.get("injection_mode", "raw"),
+                context_pct=int(body.get("context_pct", 100)),
+                language=body.get("language", "en"),
+                deep_model=body.get("deep_model"),
+                fresh_model=body.get("fresh_model"),
+                tenant=owner or "global",
+                owner_id=owner,
+                progress=on_progress,
+            )
+            await queue.put(ProgressEvent(type="result", data=result))
+        except Exception as exc:  # noqa: BLE001
+            await queue.put(
+                ProgressEvent(type="error", data={"message": str(exc), "kind": type(exc).__name__})
+            )
+        finally:
+            await queue.put(None)
+
+    worker = _asyncio.create_task(run())
+
+    async def event_stream():
+        try:
+            while True:
+                event = await queue.get()
+                if event is None:
+                    return
+                yield sse_format(event)
+        finally:
+            # If the client disconnects mid-stream, cancel the worker
+            # so no token is wasted on output nobody is consuming.
+            if not worker.done():
+                worker.cancel()
+
+    return StreamingResponse(event_stream(), media_type="text/event-stream")
+
+
+def _resolve_stream_owner(request) -> str | None:
+    """Parse the Authorization header on the SSE route.
+
+    ``_current_owner()`` reads from FastMCP's auth context which is only
+    populated inside a registered tool. Our custom route runs outside
+    that context so we re-check the bearer manually against the same
+    token map.
+    """
+    if not _TOKEN_MAP:
+        return None
+    auth = request.headers.get("authorization", "")
+    if not auth.lower().startswith("bearer "):
+        return None
+    token = auth.split(" ", 1)[1].strip()
+    for candidate, tenant in _TOKEN_MAP.items():
+        if hmac.compare_digest(token.encode("utf-8"), candidate.encode("utf-8")):
+            return tenant
+    return None
+
+
 # ---------------------------------------------------------------------------
 # Service instance
 # ---------------------------------------------------------------------------
