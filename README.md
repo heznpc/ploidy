@@ -157,6 +157,21 @@ use `delivery_mode="passive"` or `delivery_mode="active"`.
 docker compose up
 ```
 
+## Claude.ai Custom Connector
+
+Deploy once, register once, use from Claude.ai web / mobile:
+
+```sh
+# Fly.io (recommended prototype)
+flyctl launch --no-deploy --copy-config --config deploy/fly/fly.toml
+flyctl secrets set PLOIDY_TOKENS='{"<token>": "<tenant>"}'
+flyctl deploy --config deploy/fly/fly.toml
+```
+
+Then in Claude.ai → Settings → Connectors → Add custom → point at
+`https://<your-app>.fly.dev/mcp` with the token as bearer auth. Full
+walkthrough in [`docs/custom-connector.md`](docs/custom-connector.md).
+
 ## Documentation
 
 - [Getting Started](https://heznpc.github.io/ploidy-research/getting-started/) — Install and first debate

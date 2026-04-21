@@ -1,6 +1,18 @@
 # Deploying Ploidy
 
-Two supported paths:
+Three supported paths, in ascending order of surface area:
+
+- [`fly/`](fly/README.md) — single-command deploy on fly.io, free tier, ideal
+  prototype backend for a Claude.ai Custom Connector.
+- [`kubernetes/ploidy.yaml`](kubernetes/ploidy.yaml) — plain `kubectl apply`
+  manifest.
+- [`helm/ploidy/`](helm/ploidy/) — full parameterised Helm chart with
+  optional ServiceMonitor / NetworkPolicy.
+
+After deploy, see [`docs/custom-connector.md`](../docs/custom-connector.md)
+for the Claude.ai registration walkthrough.
+
+---
 
 ## Helm chart
 
