@@ -145,6 +145,75 @@ class TestStreamDebate:
         assert "ploidy[cli]" in captured.err
 
 
+class TestDescribePositionsGenerated:
+    def test_positions_generated_renders_side_and_count(self):
+        out = cli._describe("positions_generated", {"side": "fresh", "count": 2})
+        assert "fresh" in out
+        assert "2" in out
+
+
+class TestFrameJsonDecodeError:
+    def test_event_plus_invalid_json_body_is_skipped(self):
+        # event: is set but data: payload is not valid JSON — the
+        # ``_malformed_frame_is_skipped`` case only covered the missing-event
+        # branch, not the JSONDecodeError branch inside _parse_frame.
+        bad = b"event: result\ndata: not-json\n\n"
+        good = _frame("completed", {"confidence": 1.0, "points": 1})
+        frames = list(cli._iter_sse_frames(iter([bad + good])))
+        assert frames == [("completed", {"confidence": 1.0, "points": 1})]
+
+
+class TestStreamDebateAuthAndTransport:
+    def test_bearer_token_is_forwarded_as_authorization_header(self):
+        captured: dict = {}
+
+        def fake_stream(method, url, *, json, headers, timeout):
+            captured["headers"] = headers
+            ctx = MagicMock()
+            ctx.__enter__ = lambda _self: _FakeResponse(
+                status_code=200,
+                frames=[
+                    _frame("result", {"rendered_markdown": "## ok", "confidence": 1.0, "points": 1})
+                ],
+            )
+            ctx.__exit__ = lambda *_args: False
+            return ctx
+
+        with patch.object(cli, "httpx") as httpx_mod:
+            httpx_mod.stream.side_effect = fake_stream
+            httpx_mod.Timeout = MagicMock()
+            httpx_mod.HTTPError = Exception
+
+            md, code = cli._stream_debate(
+                "http://x/v1/debate/stream",
+                {"prompt": "p"},
+                token="secret-abc",
+            )
+
+        assert code == 0
+        assert md == "## ok"
+        assert captured["headers"]["Authorization"] == "Bearer secret-abc"
+
+    def test_transport_error_returns_code_3(self, capsys):
+        class FakeHTTPError(Exception):
+            pass
+
+        def raise_it(*_args, **_kw):
+            raise FakeHTTPError("connection refused")
+
+        with patch.object(cli, "httpx") as httpx_mod:
+            httpx_mod.stream.side_effect = raise_it
+            httpx_mod.Timeout = MagicMock()
+            # Must bind the exception class the CLI catches.
+            httpx_mod.HTTPError = FakeHTTPError
+
+            md, code = cli._stream_debate("http://x", {"prompt": "p"}, token=None)
+
+        assert code == 3
+        assert md is None
+        assert "transport error" in capsys.readouterr().err
+
+
 class TestArgparseWiring:
     def test_url_flag_overrides_env(self):
         # main() calls _stream_debate; we stub it to inspect the endpoint.
