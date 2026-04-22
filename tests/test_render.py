@@ -38,6 +38,25 @@ def _point(category: str, summary: str, resolution: str | None = None) -> Conver
 
 
 class TestRenderDebate:
+    def test_no_challenges_headline_suppresses_misleading_zero_pct(self):
+        """When the only point is the no_challenges marker, the headline
+        must not read 'Confidence: 0%' — that misrepresents positions
+        that substantively agree but never exchanged challenges."""
+        md = render_debate(
+            prompt="q",
+            deep_label="Deep",
+            fresh_label="Fresh",
+            deep_positions=["we should ship"],
+            fresh_positions=["yes, ship"],
+            deep_challenge=None,
+            fresh_challenge=None,
+            points=[_point("no_challenges", "positions only")],
+            synthesis="s",
+            confidence=0.0,
+        )
+        assert "Confidence: 0%" not in md
+        assert "Positions recorded — no challenges exchanged" in md
+
     def test_headline_includes_confidence_and_tallies(self):
         md = render_debate(
             prompt="should we ship?",

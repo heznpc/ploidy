@@ -38,7 +38,8 @@ class TestConvergenceEngine:
         with pytest.raises(Exception, match="expected convergence"):
             await engine.analyze(proto)
 
-    async def test_no_challenges_produces_irreducible(self):
+    async def test_no_challenges_emits_informational_point(self):
+        """No challenges → a ``no_challenges`` marker, not a disagreement."""
         proto = _make_protocol(
             messages=[
                 _msg("deep", DebatePhase.POSITION, "Rust is fast"),
@@ -48,8 +49,23 @@ class TestConvergenceEngine:
         engine = ConvergenceEngine()
         result = await engine.analyze(proto)
         assert len(result.points) == 1
-        assert result.points[0].category == "irreducible"
+        assert result.points[0].category == "no_challenges"
+        # Confidence is still a float (0.0 for DB-schema compat), but
+        # the renderer understands to suppress the number.
         assert result.confidence == 0.0
+
+    async def test_no_challenges_point_excluded_from_confidence_denominator(self):
+        """Agreement + a no_challenges marker computes confidence over 1, not 2."""
+        proto = _make_protocol(
+            messages=[
+                _msg("deep", DebatePhase.POSITION, "Rust is fast"),
+                _msg("fresh", DebatePhase.POSITION, "Rust is safe"),
+                _msg("fresh", DebatePhase.CHALLENGE, "Agree", SemanticAction.AGREE),
+            ],
+        )
+        engine = ConvergenceEngine()
+        result = await engine.analyze(proto)
+        assert result.confidence == 1.0
 
     async def test_agree_action_classified_as_agreement(self):
         proto = _make_protocol(

@@ -25,6 +25,7 @@ _CATEGORY_LABELS = {
     "agreement": ("✅", "Agreements"),
     "productive_disagreement": ("🟡", "Productive disagreements"),
     "irreducible": ("🔴", "Irreducible disagreements"),
+    "no_challenges": ("ℹ️", "No challenges exchanged"),
 }
 
 
@@ -44,10 +45,22 @@ def _aggregate_block(items: Sequence[str], label: str) -> str:
 
 
 def _tally(points: Sequence[ConvergencePoint]) -> tuple[int, int, int]:
+    # ``no_challenges`` is informational and deliberately excluded from
+    # the headline tally — it is neither agreement nor disagreement.
     agree = sum(1 for p in points if p.category == "agreement")
     prod = sum(1 for p in points if p.category == "productive_disagreement")
     irr = sum(1 for p in points if p.category == "irreducible")
     return agree, prod, irr
+
+
+def _is_no_challenges_only(points: Sequence[ConvergencePoint]) -> bool:
+    """True when the debate produced no challenge messages at all.
+
+    In that mode the confidence number is meaningless (no comparisons to
+    count), so we surface an informational headline instead of a
+    misleading "0%".
+    """
+    return len(points) > 0 and all(p.category == "no_challenges" for p in points)
 
 
 def _render_points(points: Sequence[ConvergencePoint]) -> str:
@@ -100,14 +113,19 @@ def render_debate(
 ) -> str:
     """Produce the answer-first collapsible markdown for a finished debate."""
     agree, prod, irr = _tally(points)
-    confidence_pct = int(round(confidence * 100))
-
     parts: list[str] = [
         "## Ploidy debate result",
         "",
-        (f"**Confidence: {confidence_pct}%** · ✅ {agree} · 🟡 {prod} · 🔴 {irr}"),
-        "",
     ]
+    if _is_no_challenges_only(points):
+        # Callers of ``run_solo`` without challenge text land here;
+        # confidence as a number has no denominator to normalise
+        # against, so we say so plainly.
+        parts.append("**Positions recorded — no challenges exchanged.**")
+    else:
+        confidence_pct = int(round(confidence * 100))
+        parts.append(f"**Confidence: {confidence_pct}%** · ✅ {agree} · 🟡 {prod} · 🔴 {irr}")
+    parts.append("")
 
     # Synthesis already carries the per-category breakdown and positions;
     # show it collapsed by default so the reader sees the confidence line
