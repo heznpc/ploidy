@@ -2345,7 +2345,7 @@ if __name__ == "__main__":
     MODEL = (
         args.model if args.model != "claude-opus-4-6" else BACKEND_DEFAULTS.get(BACKEND, args.model)
     )
-    JUDGE_MODEL = MODEL  # Use same model for judging by default
+    JUDGE_MODEL = "claude-opus-4-6"  # pinned to 4.6 for Stage A mirror (2026-04-23): generate-side comparison only
     EFFORT = args.effort
     LANGUAGE = args.lang
     INJECTION_MODE = args.injection

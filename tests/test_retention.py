@@ -116,3 +116,73 @@ async def test_service_run_retention_once_purges_old(tmp_path):
 
 async def test_vacuum_runs_without_error(store):
     await store.vacuum()
+
+
+# ---------------------------------------------------------------------------
+# CLI module coverage: exercises ploidy.retention.main() directly rather
+# than re-testing DebateService (that surface is covered above).
+# ---------------------------------------------------------------------------
+
+
+import asyncio
+
+from ploidy import retention
+
+
+async def _seed_retention_db(db_path):
+    s = DebateStore(db_path=db_path)
+    await s.initialize()
+    try:
+        await s.save_debate("old-done", "p")
+        await s.update_debate_status("old-done", "complete")
+        await _backdate(s, "old-done", "2020-01-01 00:00:00")
+        await s.save_debate("recent", "p")
+        await s.update_debate_status("recent", "complete")
+    finally:
+        await s.close()
+
+
+async def _get_retention_ids(db_path):
+    s = DebateStore(db_path=db_path)
+    await s.initialize()
+    try:
+        return (
+            await s.get_debate("old-done"),
+            await s.get_debate("recent"),
+        )
+    finally:
+        await s.close()
+
+
+def test_cli_purge_removes_old_terminal_rows(tmp_path, monkeypatch):
+    db_path = tmp_path / "cli_ret.db"
+    monkeypatch.setenv("PLOIDY_DB_PATH", str(db_path))
+
+    asyncio.run(_seed_retention_db(db_path))
+    rc = retention.main(["purge", "--days", "30", "--no-vacuum"])
+    assert rc == 0
+
+    old_done, recent = asyncio.run(_get_retention_ids(db_path))
+    assert old_done is None
+    assert recent is not None
+
+
+def test_cli_vacuum_on_empty_db_returns_zero(tmp_path, monkeypatch):
+    db_path = tmp_path / "cli_vac.db"
+    monkeypatch.setenv("PLOIDY_DB_PATH", str(db_path))
+
+    async def _init():
+        s = DebateStore(db_path=db_path)
+        await s.initialize()
+        await s.close()
+
+    asyncio.run(_init())
+    rc = retention.main(["vacuum"])
+    assert rc == 0
+
+
+def test_cli_missing_subcommand_exits_nonzero(monkeypatch, tmp_path):
+    monkeypatch.setenv("PLOIDY_DB_PATH", str(tmp_path / "unused.db"))
+    # argparse ``required=True`` on the subparser triggers SystemExit(2).
+    with pytest.raises(SystemExit):
+        retention.main([])
