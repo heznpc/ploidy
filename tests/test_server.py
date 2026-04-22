@@ -255,3 +255,112 @@ class TestWebappRoute:
         # Webapp docstring promises static HTML — verify the shape rather
         # than the content so this test is resilient to UI tweaks.
         assert "<!DOCTYPE html>" in text or "<html" in text.lower()
+
+
+class _FakeRequest:
+    """Minimal async request stand-in for the SSE handler."""
+
+    def __init__(self, body, headers: dict | None = None):
+        self._body = body
+        self.headers = headers or {}
+
+    async def json(self):
+        return self._body
+
+
+async def _drain_stream(resp, *, max_frames: int = 20) -> list[str]:
+    """Collect SSE frames from a StreamingResponse, bounded to avoid hangs."""
+    frames = []
+    async for chunk in resp.body_iterator:
+        text = chunk if isinstance(chunk, str) else chunk.decode("utf-8")
+        frames.append(text)
+        if len(frames) >= max_frames:
+            break
+    return frames
+
+
+class _FakeService:
+    """Stand-in for DebateService that emits a scripted progress stream."""
+
+    def __init__(
+        self,
+        *,
+        progress_events=(),
+        run_result: dict | None = None,
+        run_error: Exception | None = None,
+    ):
+        self._progress_events = list(progress_events)
+        self._run_result = run_result or {"debate_id": "x", "phase": "complete"}
+        self._run_error = run_error
+
+    async def run_auto(self, *, progress=None, **_):
+        if progress is not None:
+            for ev in self._progress_events:
+                await progress(ev)
+        if self._run_error is not None:
+            raise self._run_error
+        return self._run_result
+
+
+class TestStreamDebateRoute:
+    """``_stream_debate`` wraps ``DebateService.run_auto`` with SSE framing.
+
+    The service layer is stubbed so we can validate the SSE mechanics
+    (event ordering, error framing, bad-request handling) without
+    driving a real model call.
+    """
+
+    async def test_bad_body_returns_400(self, monkeypatch):
+        from ploidy import server as srv
+
+        async def fake_init():
+            return _FakeService()
+
+        monkeypatch.setattr(srv, "_init", fake_init)
+        resp = await srv._stream_debate(_FakeRequest(body=[1, 2, 3]))
+        assert resp.status_code == 400
+
+    async def test_progress_events_and_result_reach_the_client(self, monkeypatch):
+        from ploidy import server as srv
+        from ploidy.stream import ProgressEvent
+
+        fake_svc = _FakeService(
+            progress_events=[
+                ProgressEvent(type="phase_started", data={"phase": "position"}),
+                ProgressEvent(type="positions_generated", data={"side": "deep", "count": 1}),
+            ],
+            run_result={"debate_id": "abc", "phase": "complete", "confidence": 0.9},
+        )
+
+        async def fake_init():
+            return fake_svc
+
+        monkeypatch.setattr(srv, "_init", fake_init)
+
+        resp = await srv._stream_debate(_FakeRequest(body={"prompt": "q"}))
+        frames = await _drain_stream(resp)
+        combined = "".join(frames)
+        assert "phase_started" in combined
+        assert "positions_generated" in combined
+        # ``result`` frame is emitted after the service call returns.
+        assert "result" in combined
+        assert "abc" in combined
+
+    async def test_service_exception_emits_error_frame(self, monkeypatch):
+        from ploidy import server as srv
+
+        fake_svc = _FakeService(run_error=RuntimeError("model blew up"))
+
+        async def fake_init():
+            return fake_svc
+
+        monkeypatch.setattr(srv, "_init", fake_init)
+
+        resp = await srv._stream_debate(_FakeRequest(body={"prompt": "q"}))
+        combined = "".join(await _drain_stream(resp))
+        assert "error" in combined
+        assert "model blew up" in combined
+        # ``_drain_stream`` bounds iteration — if the error frame did not
+        # terminate the stream cleanly, we'd hit the frame cap with
+        # timeout-or-empty content, not a useful assertion failure. The
+        # ``in`` checks above cover the termination guard indirectly.
