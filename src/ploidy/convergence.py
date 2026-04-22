@@ -166,9 +166,13 @@ class ConvergenceEngine:
             )
 
         if not points and len(session_ids) >= 2:
+            # Mark this explicitly so downstream rendering does not
+            # misread "no challenges" as "irreducible disagreement"
+            # (which would drag confidence to 0% even when the two
+            # positions substantively agree).
             points.append(
                 ConvergencePoint(
-                    category="irreducible",
+                    category="no_challenges",
                     summary="No challenges exchanged — positions stand as stated.",
                     session_a_view=positions.get(session_ids[0], "")[:500],
                     session_b_view=(
@@ -178,8 +182,12 @@ class ConvergenceEngine:
                 )
             )
 
-        agree_count = sum(1 for p in points if p.category == "agreement")
-        confidence = agree_count / len(points) if points else 0.0
+        # Confidence is "agree ratio over real disagreement points".
+        # ``no_challenges`` is an informational marker, not a category
+        # that belongs in the denominator — skip it.
+        real_points = [p for p in points if p.category != "no_challenges"]
+        agree_count = sum(1 for p in real_points if p.category == "agreement")
+        confidence = agree_count / len(real_points) if real_points else 0.0
 
         synthesis = self._build_synthesis(protocol.prompt, positions, points, session_roles)
 

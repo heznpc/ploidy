@@ -333,8 +333,9 @@ async def test_debate_solo_without_challenges():
         fresh_position="B",
     )
     assert result["phase"] == "complete"
-    # No challenges → convergence engine emits the irreducible-no-challenges point
-    assert any(p["category"] == "irreducible" for p in result["points"])
+    # No challenges → convergence engine emits an informational
+    # no_challenges marker (not a disagreement).
+    assert any(p["category"] == "no_challenges" for p in result["points"])
 
 
 async def test_debate_solo_validates_input_lengths():
