@@ -32,9 +32,7 @@ INJECTION_MODES = {
             "## Project Memory\n\n"
             + "\n".join(
                 f"- **Observation #{i + 1}**: {line}"
-                for i, line in enumerate(
-                    s.strip() for s in ctx.strip().split("\n") if s.strip()
-                )
+                for i, line in enumerate(s.strip() for s in ctx.strip().split("\n") if s.strip())
             )
             + "\n---"
         ),
