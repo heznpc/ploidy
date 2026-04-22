@@ -69,6 +69,42 @@ CREATE TABLE IF NOT EXISTS convergence (
     points_json TEXT NOT NULL DEFAULT '[]',
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
+
+-- OAuth 2.0 Authorization Server tables.
+-- See ``planning/oauth-integration.md`` for the design. Co-located in
+-- the existing SQLite DB so operators get one file to back up.
+
+CREATE TABLE IF NOT EXISTS oauth_clients (
+    client_id TEXT PRIMARY KEY,
+    client_secret_hash TEXT,
+    redirect_uris TEXT NOT NULL,
+    grant_types TEXT NOT NULL,
+    token_endpoint_auth_method TEXT NOT NULL DEFAULT 'none',
+    client_name TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS oauth_codes (
+    code TEXT PRIMARY KEY,
+    client_id TEXT NOT NULL REFERENCES oauth_clients(client_id) ON DELETE CASCADE,
+    redirect_uri TEXT NOT NULL,
+    scopes TEXT NOT NULL,
+    code_challenge TEXT NOT NULL,
+    code_challenge_method TEXT NOT NULL,
+    expires_at TEXT NOT NULL,
+    used INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS oauth_tokens (
+    token TEXT PRIMARY KEY,
+    kind TEXT NOT NULL,
+    client_id TEXT NOT NULL REFERENCES oauth_clients(client_id) ON DELETE CASCADE,
+    scopes TEXT NOT NULL,
+    expires_at TEXT,
+    revoked INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
 """
 
 _SESSION_MIGRATIONS = (
@@ -110,6 +146,9 @@ CREATE INDEX IF NOT EXISTS idx_debates_status ON debates(status);
 CREATE INDEX IF NOT EXISTS idx_debates_owner ON debates(owner_id);
 CREATE INDEX IF NOT EXISTS idx_sessions_debate_id ON sessions(debate_id);
 CREATE INDEX IF NOT EXISTS idx_messages_debate_id ON messages(debate_id);
+CREATE INDEX IF NOT EXISTS idx_oauth_tokens_client ON oauth_tokens(client_id);
+CREATE INDEX IF NOT EXISTS idx_oauth_tokens_expires ON oauth_tokens(expires_at);
+CREATE INDEX IF NOT EXISTS idx_oauth_codes_expires ON oauth_codes(expires_at);
 """
 
 
@@ -680,3 +719,178 @@ class DebateStore:
         if self._db is not None:
             await self._db.close()
             self._db = None
+
+    # ------------------------------------------------------------------
+    # OAuth 2.0 storage (see planning/oauth-integration.md)
+    # ------------------------------------------------------------------
+
+    async def save_oauth_client(
+        self,
+        client_id: str,
+        *,
+        redirect_uris: list[str],
+        grant_types: list[str],
+        client_secret_hash: str | None = None,
+        token_endpoint_auth_method: str = "none",
+        client_name: str | None = None,
+    ) -> None:
+        """Register an OAuth client (RFC 7591 DCR or admin-provisioned)."""
+        db = _require_db(self._db)
+        await db.execute(
+            "INSERT INTO oauth_clients "
+            "(client_id, client_secret_hash, redirect_uris, grant_types, "
+            "token_endpoint_auth_method, client_name) VALUES (?, ?, ?, ?, ?, ?)",
+            (
+                client_id,
+                client_secret_hash,
+                json.dumps(redirect_uris),
+                json.dumps(grant_types),
+                token_endpoint_auth_method,
+                client_name,
+            ),
+        )
+        await self._commit()
+
+    async def get_oauth_client(self, client_id: str) -> dict | None:
+        """Retrieve a registered client by id, or None when unknown."""
+        db = _require_db(self._db)
+        cursor = await db.execute(
+            "SELECT client_id, client_secret_hash, redirect_uris, grant_types, "
+            "token_endpoint_auth_method, client_name, created_at "
+            "FROM oauth_clients WHERE client_id = ?",
+            (client_id,),
+        )
+        row = await cursor.fetchone()
+        if row is None:
+            return None
+        record = dict(row)
+        record["redirect_uris"] = json.loads(record["redirect_uris"])
+        record["grant_types"] = json.loads(record["grant_types"])
+        return record
+
+    async def save_oauth_code(
+        self,
+        code: str,
+        *,
+        client_id: str,
+        redirect_uri: str,
+        scopes: list[str],
+        code_challenge: str,
+        code_challenge_method: str,
+        expires_at: str,
+    ) -> None:
+        """Persist a freshly-issued authorization code pending /token exchange."""
+        db = _require_db(self._db)
+        await db.execute(
+            "INSERT INTO oauth_codes "
+            "(code, client_id, redirect_uri, scopes, code_challenge, "
+            "code_challenge_method, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (
+                code,
+                client_id,
+                redirect_uri,
+                json.dumps(scopes),
+                code_challenge,
+                code_challenge_method,
+                expires_at,
+            ),
+        )
+        await self._commit()
+
+    async def consume_oauth_code(self, code: str) -> dict | None:
+        """Atomically look up and mark a code as used.
+
+        Returns the full code record on first use, ``None`` if the code
+        is unknown, already-used, or has expired. The single-use guard is
+        critical: an attacker who captures a code must not be able to
+        redeem it twice.
+        """
+        db = _require_db(self._db)
+        async with self.transaction():
+            cursor = await db.execute(
+                "SELECT code, client_id, redirect_uri, scopes, code_challenge, "
+                "code_challenge_method, expires_at, used, created_at "
+                "FROM oauth_codes WHERE code = ?",
+                (code,),
+            )
+            row = await cursor.fetchone()
+            if row is None:
+                return None
+            record = dict(row)
+            if record["used"]:
+                return None
+            # SQLite stores the timestamps as ISO strings; compare as strings
+            # since ``datetime('now')`` is in UTC and the callers supply UTC
+            # expiry in the same ``YYYY-MM-DD HH:MM:SS`` shape.
+            now_cursor = await db.execute("SELECT datetime('now') AS now")
+            now_row = await now_cursor.fetchone()
+            if record["expires_at"] < now_row["now"]:
+                return None
+            await db.execute("UPDATE oauth_codes SET used = 1 WHERE code = ?", (code,))
+            record["scopes"] = json.loads(record["scopes"])
+            return record
+
+    async def save_oauth_token(
+        self,
+        token: str,
+        *,
+        kind: str,
+        client_id: str,
+        scopes: list[str],
+        expires_at: str | None = None,
+    ) -> None:
+        """Persist an access or refresh token (``kind`` is ``'access'`` or ``'refresh'``)."""
+        db = _require_db(self._db)
+        await db.execute(
+            "INSERT INTO oauth_tokens (token, kind, client_id, scopes, expires_at) "
+            "VALUES (?, ?, ?, ?, ?)",
+            (token, kind, client_id, json.dumps(scopes), expires_at),
+        )
+        await self._commit()
+
+    async def get_oauth_token(self, token: str) -> dict | None:
+        """Resolve a token to its record, or ``None`` when revoked / expired / unknown."""
+        db = _require_db(self._db)
+        cursor = await db.execute(
+            "SELECT token, kind, client_id, scopes, expires_at, revoked, created_at "
+            "FROM oauth_tokens WHERE token = ?",
+            (token,),
+        )
+        row = await cursor.fetchone()
+        if row is None:
+            return None
+        record = dict(row)
+        if record["revoked"]:
+            return None
+        if record["expires_at"] is not None:
+            now_cursor = await db.execute("SELECT datetime('now') AS now")
+            now_row = await now_cursor.fetchone()
+            if record["expires_at"] < now_row["now"]:
+                return None
+        record["scopes"] = json.loads(record["scopes"])
+        return record
+
+    async def revoke_oauth_token(self, token: str) -> None:
+        """Mark a token as revoked. Idempotent — unknown tokens no-op silently."""
+        db = _require_db(self._db)
+        await db.execute("UPDATE oauth_tokens SET revoked = 1 WHERE token = ?", (token,))
+        await self._commit()
+
+    async def purge_oauth_expired(self) -> int:
+        """Delete expired/used codes and expired/revoked tokens.
+
+        Returns the combined row count removed. Intended to be called
+        from the retention loop alongside ``purge_terminal_before``.
+        """
+        db = _require_db(self._db)
+        async with self.transaction():
+            # Remove codes that are past their expiry or already consumed.
+            c1 = await db.execute(
+                "DELETE FROM oauth_codes WHERE used = 1 OR expires_at < datetime('now')"
+            )
+            # Tokens: revoked OR (expires_at set AND past).
+            c2 = await db.execute(
+                "DELETE FROM oauth_tokens WHERE revoked = 1 "
+                "OR (expires_at IS NOT NULL AND expires_at < datetime('now'))"
+            )
+            return (c1.rowcount or 0) + (c2.rowcount or 0)
