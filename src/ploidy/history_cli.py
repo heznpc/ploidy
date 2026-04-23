@@ -24,8 +24,12 @@ import json
 import sys
 
 from ploidy.convergence import ConvergencePoint
+from ploidy.protocol import DebatePhase
 from ploidy.render import render_debate
 from ploidy.store import DebateStore
+
+_POSITION = DebatePhase.POSITION.value
+_CHALLENGE = DebatePhase.CHALLENGE.value
 
 
 def _truncate(text: str, width: int) -> str:
@@ -166,8 +170,11 @@ async def _print_rendered(store: DebateStore, debate: dict, conv: dict | None) -
         print("(No convergence result yet.)")
         return 0
 
-    sessions = await store.get_sessions(debate["id"])
-    messages = await store.get_messages(debate["id"])
+    # Sessions and messages are independent reads — fetch in parallel.
+    sessions, messages = await asyncio.gather(
+        store.get_sessions(debate["id"]),
+        store.get_messages(debate["id"]),
+    )
 
     deep_sids = [s["id"] for s in sessions if s["role"] == "deep"]
     fresh_sids = [s["id"] for s in sessions if s["role"] != "deep"]
@@ -175,14 +182,14 @@ async def _print_rendered(store: DebateStore, debate: dict, conv: dict | None) -
     msgs_by_sp: dict[tuple[str, str], str] = {
         (m["session_id"], m["phase"]): m["content"] for m in messages
     }
-    deep_positions = [msgs_by_sp.get((sid, "position"), "") for sid in deep_sids]
-    fresh_positions = [msgs_by_sp.get((sid, "position"), "") for sid in fresh_sids]
+    deep_positions = [msgs_by_sp.get((sid, _POSITION), "") for sid in deep_sids]
+    fresh_positions = [msgs_by_sp.get((sid, _POSITION), "") for sid in fresh_sids]
     deep_challenge = next(
-        (msgs_by_sp[sid, "challenge"] for sid in deep_sids if (sid, "challenge") in msgs_by_sp),
+        (msgs_by_sp[sid, _CHALLENGE] for sid in deep_sids if (sid, _CHALLENGE) in msgs_by_sp),
         None,
     )
     fresh_challenge = next(
-        (msgs_by_sp[sid, "challenge"] for sid in fresh_sids if (sid, "challenge") in msgs_by_sp),
+        (msgs_by_sp[sid, _CHALLENGE] for sid in fresh_sids if (sid, _CHALLENGE) in msgs_by_sp),
         None,
     )
 

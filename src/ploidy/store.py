@@ -19,6 +19,7 @@ import json
 import os
 from contextlib import asynccontextmanager
 from pathlib import Path
+from typing import Literal
 
 import aiosqlite
 
@@ -804,6 +805,21 @@ class DebateStore:
         )
         await self._commit()
 
+    # Single-source-of-truth SELECT for live OAuth codes. The ``used = 0
+    # AND expires_at >= datetime('now')`` clause filters consumed /
+    # expired rows at the DB layer, which collapses the previous
+    # three-query dance (fetch row → compare ``used`` in Python → fetch
+    # ``datetime('now')`` → compare expiry in Python) into a single
+    # round trip. SQLite compares the ISO timestamps as strings, which
+    # is correct because ``datetime('now')`` and our stored
+    # ``YYYY-MM-DD HH:MM:SS`` values share lexical ordering.
+    _OAUTH_CODE_LIVE_SELECT = (
+        "SELECT code, client_id, redirect_uri, scopes, code_challenge, "
+        "code_challenge_method, expires_at, used, created_at "
+        "FROM oauth_codes "
+        "WHERE code = ? AND used = 0 AND expires_at >= datetime('now')"
+    )
+
     async def get_oauth_code_for_load(self, code: str) -> dict | None:
         """Read-only code lookup used by ``load_authorization_code``.
 
@@ -814,22 +830,11 @@ class DebateStore:
         unused, and not yet expired.
         """
         db = _require_db(self._db)
-        cursor = await db.execute(
-            "SELECT code, client_id, redirect_uri, scopes, code_challenge, "
-            "code_challenge_method, expires_at, used, created_at "
-            "FROM oauth_codes WHERE code = ?",
-            (code,),
-        )
+        cursor = await db.execute(self._OAUTH_CODE_LIVE_SELECT, (code,))
         row = await cursor.fetchone()
         if row is None:
             return None
         record = dict(row)
-        if record["used"]:
-            return None
-        now_cursor = await db.execute("SELECT datetime('now') AS now")
-        now_row = await now_cursor.fetchone()
-        if record["expires_at"] < now_row["now"]:
-            return None
         record["scopes"] = json.loads(record["scopes"])
         return record
 
@@ -843,25 +848,11 @@ class DebateStore:
         """
         db = _require_db(self._db)
         async with self.transaction():
-            cursor = await db.execute(
-                "SELECT code, client_id, redirect_uri, scopes, code_challenge, "
-                "code_challenge_method, expires_at, used, created_at "
-                "FROM oauth_codes WHERE code = ?",
-                (code,),
-            )
+            cursor = await db.execute(self._OAUTH_CODE_LIVE_SELECT, (code,))
             row = await cursor.fetchone()
             if row is None:
                 return None
             record = dict(row)
-            if record["used"]:
-                return None
-            # SQLite stores the timestamps as ISO strings; compare as strings
-            # since ``datetime('now')`` is in UTC and the callers supply UTC
-            # expiry in the same ``YYYY-MM-DD HH:MM:SS`` shape.
-            now_cursor = await db.execute("SELECT datetime('now') AS now")
-            now_row = await now_cursor.fetchone()
-            if record["expires_at"] < now_row["now"]:
-                return None
             await db.execute("UPDATE oauth_codes SET used = 1 WHERE code = ?", (code,))
             record["scopes"] = json.loads(record["scopes"])
             return record
@@ -870,12 +861,12 @@ class DebateStore:
         self,
         token: str,
         *,
-        kind: str,
+        kind: Literal["access", "refresh"],
         client_id: str,
         scopes: list[str],
         expires_at: str | None = None,
     ) -> None:
-        """Persist an access or refresh token (``kind`` is ``'access'`` or ``'refresh'``)."""
+        """Persist an access or refresh token."""
         db = _require_db(self._db)
         await db.execute(
             "INSERT INTO oauth_tokens (token, kind, client_id, scopes, expires_at) "
@@ -885,24 +876,24 @@ class DebateStore:
         await self._commit()
 
     async def get_oauth_token(self, token: str) -> dict | None:
-        """Resolve a token to its record, or ``None`` when revoked / expired / unknown."""
+        """Resolve a token to its record, or ``None`` when revoked / expired / unknown.
+
+        Liveness (``revoked = 0``) and expiry (``expires_at IS NULL OR
+        >= datetime('now')``) are both filtered at the SQL layer to save
+        a round trip per lookup — this is on the auth hot path.
+        """
         db = _require_db(self._db)
         cursor = await db.execute(
             "SELECT token, kind, client_id, scopes, expires_at, revoked, created_at "
-            "FROM oauth_tokens WHERE token = ?",
+            "FROM oauth_tokens "
+            "WHERE token = ? AND revoked = 0 "
+            "AND (expires_at IS NULL OR expires_at >= datetime('now'))",
             (token,),
         )
         row = await cursor.fetchone()
         if row is None:
             return None
         record = dict(row)
-        if record["revoked"]:
-            return None
-        if record["expires_at"] is not None:
-            now_cursor = await db.execute("SELECT datetime('now') AS now")
-            now_row = await now_cursor.fetchone()
-            if record["expires_at"] < now_row["now"]:
-                return None
         record["scopes"] = json.loads(record["scopes"])
         return record
 
