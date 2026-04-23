@@ -43,13 +43,12 @@ Thumbs.db
 # MkDocs build
 site/
 
-# Korean documentation (local only) — internal planning / review docs
-# stay excluded. Public legal artefacts are explicitly re-included so
-# they ship alongside the English originals (PIPA requires Korean notices
-# for Korean users).
+# Korean documentation (local only). Internal planning / review docs
+# (ARCHITECTURE.ko.md, EXPERT_REVIEW_*.ko.md, SESSION_*.ko.md) stay
+# here and out of the public repo. Public Korean legal notices live
+# at ``docs/*.ko.md`` to avoid the parent-directory re-include trap
+# (git cannot negate files under an excluded directory).
 docs/ko/
-!docs/ko/privacy-policy.md
-!docs/ko/terms-of-service.md
 
 # Claude Code / agent local config
 CLAUDE.md
